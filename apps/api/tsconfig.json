@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "test", "**/*spec.ts"],
+  "references": [
+    { "path": "../../packages/application" },
+    { "path": "../../packages/conversation" },
+    { "path": "../../packages/domain" },
+    { "path": "../../packages/infrastructure" },
+    { "path": "../../packages/mission-orchestrator" },
+    { "path": "../../packages/outreach" },
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/temporal-client" }
+  ]
+}

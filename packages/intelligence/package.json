@@ -1,0 +1,28 @@
+{
+  "name": "@projectx/intelligence",
+  "version": "0.0.1",
+  "private": true,
+  "description": "AI-Native Revenue Intelligence & Lead Generation Engine",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "pnpm exec jest --config ../../jest.config.js --testMatch='**/packages/intelligence/**/*.spec.ts'",
+    "lint": "eslint \"src/**/*.ts\" --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@projectx/ai-runtime": "workspace:*",
+    "@projectx/domain": "workspace:*",
+    "@projectx/infrastructure": "workspace:*",
+    "@projectx/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

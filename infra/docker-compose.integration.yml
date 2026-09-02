@@ -1,0 +1,87 @@
+# Local integration-test environment for Phase 14.7c.
+# Provides real PostgreSQL, Redis, and Temporal infrastructure.
+# Do NOT use for production or with production credentials.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: projectx-integration-postgres
+    environment:
+      POSTGRES_USER: projectx
+      POSTGRES_PASSWORD: projectx
+      POSTGRES_DB: projectx
+    ports:
+      - "5433:5432"
+    volumes:
+      - projectx-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U projectx -d projectx"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - projectx-integration
+
+  redis:
+    image: redis:7-alpine
+    container_name: projectx-integration-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - projectx-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 3s
+    networks:
+      - projectx-integration
+
+  temporal:
+    image: temporalio/auto-setup:1.25.1
+    container_name: projectx-integration-temporal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: projectx
+      POSTGRES_PWD: projectx
+      POSTGRES_SEEDS: postgres
+      NUM_HISTORY_SHARDS: 1
+    ports:
+      - "7234:7233"
+      - "8234:8233"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z $$(hostname -i) 7233"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks:
+      - projectx-integration
+
+  temporal-ui:
+    image: temporalio/ui:2.31.0
+    container_name: projectx-integration-temporal-ui
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8233:8080"
+    networks:
+      - projectx-integration
+
+volumes:
+  projectx-postgres-data:
+  projectx-redis-data:
+
+networks:
+  projectx-integration:
+    driver: bridge

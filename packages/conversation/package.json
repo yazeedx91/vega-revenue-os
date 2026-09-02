@@ -1,0 +1,33 @@
+{
+  "name": "@projectx/conversation",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Conversation & Response Management",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "pnpm exec jest --config ../../jest.config.js --testMatch='**/packages/conversation/**/*.spec.ts'",
+    "lint": "eslint \"src/**/*.ts\" --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@projectx/ai-runtime": "workspace:*",
+    "@projectx/domain": "workspace:*",
+    "@projectx/infrastructure": "workspace:*",
+    "@projectx/intelligence": "workspace:*",
+    "@projectx/mission-orchestrator": "workspace:*",
+    "@projectx/outreach": "workspace:*",
+    "@projectx/shared": "workspace:*",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

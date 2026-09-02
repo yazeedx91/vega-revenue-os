@@ -1,0 +1,23 @@
+{
+  "name": "@projectx/temporal-client",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm exec jest --config ../../jest.config.js --testPathPattern=\"packages/temporal-client\" --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@projectx/domain": "workspace:*",
+    "@projectx/infrastructure": "workspace:*",
+    "@projectx/outreach": "workspace:*",
+    "@projectx/shared": "workspace:*",
+    "@temporalio/client": "^1.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

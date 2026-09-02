@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment (NEVER commit secrets)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+
+# Local temp files
+.tmp/
+temp/
+
+# Local generated artifacts
+package-lock.json
+audit-findings.json
+.phase14-8-real-send-state.json
+phase14-prepare-error.txt
+plans/

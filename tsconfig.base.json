@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node",
+    "ignoreDeprecations": "5.0",
+    "composite": true,
+    "paths": {
+      "@projectx/domain": ["./packages/domain/src"],
+      "@projectx/infrastructure": ["./packages/infrastructure/src"],
+      "@projectx/ai-runtime": ["./packages/ai-runtime/src"],
+      "@projectx/application": ["./packages/application/src"],
+      "@projectx/shared": ["./packages/shared/src"],
+      "@projectx/intelligence": ["./packages/intelligence/src"],
+      "@projectx/mission-orchestrator": ["./packages/mission-orchestrator/src"],
+      "@projectx/outreach": ["./packages/outreach/src"],
+      "@projectx/conversation": ["./packages/conversation/src"],
+      "@projectx/tool-gateway": ["./packages/tool-gateway/src"],
+      "@projectx/llm-gateway": ["./packages/llm-gateway/src"],
+      "@projectx/temporal-client": ["./packages/temporal-client/src"]
+    }
+  },
+  "exclude": ["node_modules", "dist", "*.d.ts"]
+}
