@@ -365,10 +365,10 @@ export async function runMigrations(url = getAdminDatabaseUrl()): Promise<void> 
 }
 
 export function requireEnv(): void {
-  if (!process.env.APP_DATABASE_URL && !process.env.DATABASE_URL) {
+  if (!process.env.APP_DATABASE_URL) {
     process.env.APP_DATABASE_URL = DEFAULT_APP_DATABASE_URL;
   }
-  if (!process.env.ADMIN_DATABASE_URL && !process.env.DATABASE_URL) {
+  if (!process.env.ADMIN_DATABASE_URL) {
     process.env.ADMIN_DATABASE_URL = DEFAULT_ADMIN_DATABASE_URL;
   }
   if (!process.env.REDIS_URL) process.env.REDIS_URL = DEFAULT_REDIS_URL;

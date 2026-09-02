@@ -46,15 +46,34 @@ async function resolveSecret(
         const pool = new Pool({ connectionString: process.env.DATABASE_URL });
         const repository = new PostgresIdentityRepository({ pool });
 
-        const tokenSecret = (await resolveSecret(
+        const activeReference = process.env.JWT_SIGNING_KEY_ACTIVE_REFERENCE;
+        if (!activeReference) {
+          throw new Error('JWT_SIGNING_KEY_ACTIVE_REFERENCE is required');
+        }
+        const activeKid = process.env.JWT_SIGNING_KEY_ACTIVE_KID;
+        if (!activeKid) {
+          throw new Error('JWT_SIGNING_KEY_ACTIVE_KID is required');
+        }
+
+        let previous = undefined;
+        const previousReference = process.env.JWT_SIGNING_KEY_PREVIOUS_REFERENCE;
+        const previousKid = process.env.JWT_SIGNING_KEY_PREVIOUS_KID;
+        const previousValidUntil = process.env.JWT_SIGNING_KEY_PREVIOUS_VALID_UNTIL;
+        if (previousReference && previousKid && previousValidUntil) {
+          previous = {
+            reference: previousReference,
+            kid: previousKid,
+            validUntil: Date.parse(previousValidUntil),
+          };
+        }
+
+        const tokenIssuer = await HmacTokenIssuer.create({
           secrets,
-          process.env.IDENTITY_TOKEN_SECRET,
-          process.env.IDENTITY_TOKEN_SECRET_REFERENCE,
-        )) ?? 'dev-token-secret-do-not-use-in-production';
-        const tokenIssuer = new HmacTokenIssuer({
-          secret: tokenSecret,
+          active: { reference: activeReference, kid: activeKid },
+          previous,
           issuer: process.env.IDENTITY_TOKEN_ISSUER ?? 'projectx',
           audience: process.env.IDENTITY_TOKEN_AUDIENCE ?? 'projectx-api',
+          telemetry,
         });
 
         const providerMode = process.env.IDENTITY_PROVIDER ?? 'entra';

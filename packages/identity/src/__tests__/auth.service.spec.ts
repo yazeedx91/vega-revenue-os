@@ -3,6 +3,7 @@ import { HmacTokenIssuer } from '../infrastructure/hmac-token-issuer';
 import { FakeOidcProvider } from '../infrastructure/fake-oidc-provider';
 import { asTenantId } from '@projectx/shared';
 import { FakeIdentityRepository } from './fake-identity-repository';
+import { FakeSecretsProvider } from './fake-secrets-provider';
 
 class FakeAuditLog {
   records: unknown[] = [];
@@ -23,15 +24,27 @@ class FakeTelemetry {
   log(_: 'debug' | 'info' | 'warn' | 'error', _m: string, _meta?: Record<string, unknown>) {}
 }
 
+function base64Key() {
+  return Buffer.from(Array.from({ length: 32 }, (_, i) => i)).toString('base64url');
+}
+
+const testKey = base64Key();
+
 describe('AuthService', () => {
+  let issuer: HmacTokenIssuer;
   const repository = new FakeIdentityRepository();
-  const issuer = new HmacTokenIssuer({
-    secret: 'test-secret',
-    issuer: 'test',
-    audience: 'test',
-  });
   const audit = new FakeAuditLog();
   const telemetry = new FakeTelemetry();
+
+  beforeAll(async () => {
+    issuer = await HmacTokenIssuer.create({
+      secrets: new FakeSecretsProvider({ 'jwt-active-ref': testKey }),
+      active: { reference: 'jwt-active-ref', kid: 'active-kid' },
+      issuer: 'test',
+      audience: 'test',
+      refreshIntervalMs: 0,
+    });
+  });
 
   beforeEach(() => {
     repository['users'].clear();

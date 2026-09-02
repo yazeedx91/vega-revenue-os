@@ -25,7 +25,7 @@ export class PostgresIdentityRepository implements IdentityRepository {
   async upsertUser(lookup: UserIdentityLookup): Promise<User> {
     const result = await this.pool.query(
       `INSERT INTO identity.users (id, email, name, tenant_id)
-       VALUES ($1, $2, $3, $1)
+       VALUES ($1::UUID, $2, $3, $1::TEXT)
        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
        RETURNING id, email, name, tenant_id, created_at`,
       [lookup.id, lookup.email, lookup.name],
@@ -108,18 +108,22 @@ export class PostgresIdentityRepository implements IdentityRepository {
   }
 
   async listWorkspacesForUser(userId: string): Promise<Workspace[]> {
-    const result = await this.pool.query(
-      `SELECT id, tenant_id, name, owner_user_id, created_at
-       FROM identity.list_workspaces_for_user($1)`,
-      [userId],
-    );
-    return result.rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      tenantId: asTenantId(row.tenant_id),
-      ownerUserId: row.owner_user_id,
-      createdAt: new Date(row.created_at),
-    }));
+    return this.withTenant(asTenantId(userId), async (client) => {
+      const result = await client.query(
+        `SELECT w.id, w.tenant_id, w.name, w.owner_user_id, w.created_at
+         FROM identity.workspaces w
+         JOIN identity.memberships m ON m.workspace_id = w.id
+         WHERE m.user_id = $1::UUID`,
+        [userId],
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        tenantId: asTenantId(row.tenant_id),
+        ownerUserId: row.owner_user_id,
+        createdAt: new Date(row.created_at),
+      }));
+    });
   }
 
   async addMember(

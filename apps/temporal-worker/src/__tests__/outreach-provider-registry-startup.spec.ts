@@ -5,8 +5,9 @@ import type { TenantId } from '@projectx/shared';
 import { createDurableAdapters, createOutreachExecutionService } from '../outreach-execution-service.factory';
 
 describe('Outreach provider registry startup (integration)', () => {
-  const databaseUrl =
-    process.env.DATABASE_URL ?? 'postgresql://projectx:projectx@localhost:5433/projectx';
+  // Integration tests seed and read cross-tenant configuration, which requires the
+  // admin/owner connection. The runtime factory reads DATABASE_URL internally.
+  const databaseUrl = 'postgresql://projectx:projectx@localhost:5433/projectx';
 
   let pool: Pool | undefined;
   let tempTenantId: string | undefined;

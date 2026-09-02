@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { Pool } from 'pg';
 import { asCorrelationId, asTenantId } from '@projectx/shared';
 import {
+  DEFAULT_ADMIN_DATABASE_URL,
   getAdminDatabaseUrl,
   getAppDatabaseUrl,
 } from '../../../../tests/e2e/phase14/integration-config';
@@ -38,8 +39,11 @@ async function isReachable(connectionString: string): Promise<boolean> {
 describe('PostgreSQL integration acceptance', () => {
   let pool: Pool;
   let client: PostgresClient;
+  let adminPool: Pool;
 
   beforeAll(async () => {
+    // Always run migrations as the admin user, not the runtime app role.
+    process.env.ADMIN_DATABASE_URL = DEFAULT_ADMIN_DATABASE_URL;
     const appConnectionString = getAppDatabaseUrl();
     const adminConnectionString = getAdminDatabaseUrl();
     if (!(await isReachable(adminConnectionString))) {
@@ -49,6 +53,16 @@ describe('PostgreSQL integration acceptance', () => {
     }
 
     await runMigrations(adminConnectionString);
+
+    const adminParsed = new URL(adminConnectionString);
+    adminPool = new Pool({
+      host: '127.0.0.1',
+      port: Number(adminParsed.port || 5432),
+      user: decodeURIComponent(adminParsed.username || 'projectx'),
+      password: decodeURIComponent(adminParsed.password || 'projectx'),
+      database: (adminParsed.pathname || '/projectx').slice(1) || 'projectx',
+    });
+    await adminPool.query('TRUNCATE TABLE outreach.allowed_recipients');
 
     const parsed = new URL(appConnectionString);
     pool = new Pool({
@@ -63,6 +77,7 @@ describe('PostgreSQL integration acceptance', () => {
 
   afterAll(async () => {
     await pool?.end();
+    await adminPool?.end();
   });
 
   function ctx(tenantId: string) {
