@@ -1,6 +1,5 @@
-import { defineQuery, defineSignal, proxyActivities, setHandler } from '@temporalio/workflow';
+import { condition, defineQuery, defineSignal, proxyActivities, setHandler } from '@temporalio/workflow';
 import type { TenantContext } from '@projectx/domain';
-import type { AIExecutionResult } from '@projectx/shared';
 import type {
   MissionWorkflowInput,
   MissionWorkflowStatus,
@@ -16,24 +15,20 @@ const activityOptions = {
 
 type MissionActivities = Pick<
   typeof missionActivities,
-  | 'planMissionActivity'
-  | 'executeTaskActivity'
-  | 'handleTaskResultActivity'
-  | 'evaluateCompletionActivity'
-  | 'checkpointActivity'
+  'planMissionActivity' | 'executeMissionStepActivity' | 'checkpointActivity'
 >;
 
 const {
   planMissionActivity: planMission,
-  executeTaskActivity: executeTask,
-  handleTaskResultActivity: handleTaskResult,
-  evaluateCompletionActivity: evaluateCompletion,
+  executeMissionStepActivity: executeMissionStep,
   checkpointActivity: checkpoint,
 } = proxyActivities<MissionActivities>(activityOptions);
 
 export const controlSignal = defineSignal<[MissionControlSignal]>('control');
 export const approvalSignal = defineSignal<[ApprovalDecisionSignal]>('approvalDecision');
 export const statusQuery = defineQuery<MissionWorkflowStatus | undefined>('status');
+
+const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'ARCHIVED']);
 
 export async function MissionWorkflow(input: MissionWorkflowInput): Promise<void> {
   const ctx: TenantContext = {
@@ -67,47 +62,33 @@ export async function MissionWorkflow(input: MissionWorkflowInput): Promise<void
     if (controlRequest?.action === 'CANCEL') {
       status = { ...status, status: 'CANCELLED' };
       running = false;
-      break;
+      continue;
     }
 
     if (controlRequest?.action === 'PAUSE') {
       status = { ...status, status: 'PAUSED' };
       controlRequest = undefined;
+      await condition(() => controlRequest !== undefined);
       continue;
     }
 
     if (controlRequest?.action === 'RESUME') {
       status = { ...status, status: 'EXECUTING' };
       controlRequest = undefined;
+      continue;
     }
 
     if (pendingApproval) {
       pendingApproval = undefined;
     }
 
-    await checkpoint(ctx, { id: input.missionId, tenantId: input.tenantId } as never);
+    await checkpoint(ctx, input.missionId);
 
-    // Placeholder step: the full implementation will select the next runnable
-    // task from the mission aggregate and loop until the mission is terminal.
-    const result: AIExecutionResult = (await executeTask(
-      ctx,
-      { id: input.missionId, tenantId: input.tenantId } as never,
-      { id: `${input.missionId}-task` } as never,
-    )) as AIExecutionResult;
+    const step = await executeMissionStep(ctx, input.missionId);
+    status = { missionId: step.missionId, status: step.status, currentTaskId: step.completedTaskId };
 
-    await handleTaskResult(
-      ctx,
-      { id: input.missionId, tenantId: input.tenantId } as never,
-      { id: `${input.missionId}-task` } as never,
-      result,
-    );
-
-    await evaluateCompletion(ctx, {
-      id: input.missionId,
-      tenantId: input.tenantId,
-    } as never);
-
-    status = { ...status, status: 'COMPLETED' };
-    running = false;
+    if (TERMINAL_STATUSES.has(step.status)) {
+      running = false;
+    }
   }
 }

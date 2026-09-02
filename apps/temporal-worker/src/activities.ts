@@ -6,7 +6,9 @@ import {
   InMemoryMissionRepository,
   InMemoryNotificationAdapter,
   MissionExecutionEngine,
+  PostgresMissionRepository,
   planMissionActivity,
+  executeMissionStepActivity,
   executeTaskActivity,
   handleTaskResultActivity,
   evaluateCompletionActivity,
@@ -15,6 +17,7 @@ import {
 } from '@projectx/mission-orchestrator';
 import type { TenantContext } from '@projectx/domain';
 import type { IWorkflowClient, WorkflowExecutionRef, WorkflowStartOptions, WorkflowStartResult } from '@projectx/infrastructure';
+import { Pool } from 'pg';
 import type { CorrelationId, TenantId } from '@projectx/shared';
 import { asCorrelationId, asEventId, asIdempotencyKey } from '@projectx/shared';
 import { StubAgentExecutor, StubAgentRegistry, StubMissionPlanner } from './stubs';
@@ -58,7 +61,11 @@ class NoOpWorkflowClient implements IWorkflowClient {
   async cancel(_ctx: TenantContext, _ref: WorkflowExecutionRef): Promise<void> {}
 }
 
-const missionRepository = new InMemoryMissionRepository();
+const missionRepository = process.env.DATABASE_URL
+  ? new PostgresMissionRepository({
+      pool: new Pool({ connectionString: process.env.DATABASE_URL, max: 5 }),
+    })
+  : new InMemoryMissionRepository();
 const approvalRepository = new InMemoryApprovalRepository();
 const compensationPort = new InMemoryCompensationAdapter();
 const notificationPort = new InMemoryNotificationAdapter();
@@ -97,6 +104,7 @@ setActivityEngineContext(engine);
 
 export {
   planMissionActivity,
+  executeMissionStepActivity,
   executeTaskActivity,
   handleTaskResultActivity,
   evaluateCompletionActivity,

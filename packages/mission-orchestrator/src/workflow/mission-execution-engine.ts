@@ -114,7 +114,7 @@ export class MissionExecutionEngine {
       throw new Error(`Cannot mark plan valid: ${planValidResult.error.message}`);
     }
 
-    await this.saveAndPublish(mission);
+    await this.saveAndPublish(ctx, mission);
   }
 
   async runTask(ctx: TenantContext, mission: Mission, task: MissionTask): Promise<AIExecutionResult> {
@@ -126,7 +126,7 @@ export class MissionExecutionEngine {
     if (!startResult.success) {
       throw new Error(`Cannot start task ${task.id}: ${startResult.error.message}`);
     }
-    await this.saveAndPublish(mission);
+    await this.saveAndPublish(ctx, mission);
 
     const executionId = this.deps.generateExecutionId();
     const request = this.buildExecutionRequest(ctx, mission, task, executionId);
@@ -136,6 +136,26 @@ export class MissionExecutionEngine {
   async executeTask(ctx: TenantContext, mission: Mission, task: MissionTask): Promise<void> {
     const result = await this.runTask(ctx, mission, task);
     await this.handleTaskResult(ctx, mission, task, result);
+  }
+
+  async executeMissionStep(
+    ctx: TenantContext,
+    missionId: string,
+  ): Promise<{ missionId: string; status: Mission['status']; completedTaskId?: string }> {
+    const mission = await this.loadMission(ctx, missionId);
+    if (this.isTerminal(mission.status)) {
+      return { missionId, status: mission.status };
+    }
+    if (mission.status !== 'EXECUTING') {
+      return { missionId, status: mission.status };
+    }
+    const nextTask = this.selectNextTask(mission);
+    if (!nextTask) {
+      await this.evaluateCompletion(ctx, mission);
+      return { missionId, status: mission.status };
+    }
+    await this.executeTask(ctx, mission, nextTask);
+    return { missionId, status: mission.status, completedTaskId: nextTask.id as string };
   }
 
   async handleTaskResult(
@@ -181,7 +201,7 @@ export class MissionExecutionEngine {
       }
     }
 
-    await this.saveAndPublish(mission);
+    await this.saveAndPublish(ctx, mission);
   }
 
   async evaluateCompletion(ctx: TenantContext, mission: Mission): Promise<void> {
@@ -205,7 +225,7 @@ export class MissionExecutionEngine {
         throw new Error(`Cannot fail mission: ${result.error.message}`);
       }
     }
-    await this.saveAndPublish(mission);
+    await this.saveAndPublish(ctx, mission);
   }
 
   private async requestApproval(
@@ -327,7 +347,7 @@ export class MissionExecutionEngine {
   }
 
   private async loadMission(ctx: TenantContext, missionId: string): Promise<Mission> {
-    const mission = await this.deps.missionRepository.load(ctx.tenantId, missionId);
+    const mission = await this.deps.missionRepository.findById(ctx, missionId);
     if (!mission) {
       throw new Error(`Mission ${missionId} not found`);
     }
@@ -335,8 +355,8 @@ export class MissionExecutionEngine {
     return mission;
   }
 
-  private async saveAndPublish(mission: Mission): Promise<void> {
-    await this.deps.missionRepository.save(mission);
+  private async saveAndPublish(ctx: TenantContext, mission: Mission): Promise<void> {
+    await this.deps.missionRepository.save(ctx, mission);
     for (const event of mission.domainEvents) {
       await this.deps.eventBus.publish(event);
     }

@@ -242,7 +242,7 @@ async function seedMissionAndProfile(ctx: TenantContext, deps: ReturnType<typeof
   m.approve(actor, asCorrelationId('corr-approve'), asEventId('evt-approve'));
   m.start(asCorrelationId('corr-start'), asEventId('evt-start'));
   m.clearDomainEvents();
-  await deps.missionRepository.save(m);
+  await deps.missionRepository.save(ctx, m);
   return m;
 }
 
@@ -258,7 +258,7 @@ describe('Phase 11 mission integration', () => {
 
     await deps.missionEngine.executeMission(ctx, 'mission-1');
 
-    const mission = await deps.missionRepository.load(ctx.tenantId, 'mission-1');
+    const mission = await deps.missionRepository.findById(ctx, 'mission-1');
     expect(mission?.status).toBe('COMPLETED');
 
     const qualified = await deps.leadRepo.findQualified(ctx);

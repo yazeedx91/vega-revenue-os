@@ -30,15 +30,14 @@ export class MissionOrchestratorService {
     ctx: TenantContext,
     cmd: StartMissionCommand,
   ): Promise<{ workflowId: string; correlationId: CorrelationId }> {
-    const idempotencyKey = this.deps.generateIdempotencyKey(`start-mission:${cmd.missionId}`);
-    const cached = await this.deps.idempotencyStore.get<{ workflowId: string; correlationId: CorrelationId }>(
-      idempotencyKey,
-    );
-    if (cached) {
-      return cached;
+    const mission = await this.loadMission(ctx, cmd.missionId);
+    const workflowId = WorkflowIdFactory.forMission(ctx.tenantId as string, cmd.missionId);
+
+    const alreadyRunning = new Set(['PLANNING', 'EXECUTING']).has(mission.status);
+    if (alreadyRunning) {
+      return { workflowId, correlationId: ctx.correlationId as CorrelationId };
     }
 
-    const mission = await this.loadMission(ctx, cmd.missionId);
     const eventId = this.deps.generateEventId();
     const correlationId = this.deps.generateCorrelationId();
     const result = mission.start(correlationId, eventId);
@@ -46,9 +45,8 @@ export class MissionOrchestratorService {
       throw new Error(`Cannot start mission: ${result.error.message}`);
     }
 
-    await this.saveAndPublish(mission);
+    await this.saveAndPublish(ctx, mission);
 
-    const workflowId = WorkflowIdFactory.forMission(ctx.tenantId as string, cmd.missionId);
     await this.deps.workflowClient.start(
       ctx,
       'MissionExecutionWorkflow',
@@ -57,12 +55,10 @@ export class MissionOrchestratorService {
         missionId: cmd.missionId,
         correlationId,
       },
-      { idempotencyKey, timeoutSeconds: 86400, workflowId },
+      { timeoutSeconds: 86400, workflowId },
     );
 
-    const response = { workflowId, correlationId };
-    await this.deps.idempotencyStore.set(idempotencyKey, response);
-    return response;
+    return { workflowId, correlationId };
   }
 
   async pauseMission(ctx: TenantContext, cmd: PauseMissionCommand): Promise<void> {
@@ -73,7 +69,7 @@ export class MissionOrchestratorService {
     if (!result.success) {
       throw new Error(`Cannot pause mission: ${result.error.message}`);
     }
-    await this.saveAndPublish(mission);
+    await this.saveAndPublish(ctx, mission);
     await this.signalWorkflow(ctx, cmd.missionId, 'pause', { reason: cmd.reason });
   }
 
@@ -85,7 +81,7 @@ export class MissionOrchestratorService {
     if (!result.success) {
       throw new Error(`Cannot resume mission: ${result.error.message}`);
     }
-    await this.saveAndPublish(mission);
+    await this.saveAndPublish(ctx, mission);
     await this.signalWorkflow(ctx, cmd.missionId, 'resume', {});
   }
 
@@ -97,13 +93,13 @@ export class MissionOrchestratorService {
     if (!result.success) {
       throw new Error(`Cannot cancel mission: ${result.error.message}`);
     }
-    await this.saveAndPublish(mission);
+    await this.saveAndPublish(ctx, mission);
     await this.signalWorkflow(ctx, cmd.missionId, 'cancel', { reason: cmd.reason });
     await this.cancelWorkflow(ctx, cmd.missionId);
   }
 
   private async loadMission(ctx: TenantContext, missionId: string) {
-    const mission = await this.deps.missionRepository.load(ctx.tenantId, missionId);
+    const mission = await this.deps.missionRepository.findById(ctx, missionId);
     if (!mission) {
       throw new Error(`Mission ${missionId} not found`);
     }
@@ -111,8 +107,8 @@ export class MissionOrchestratorService {
     return mission;
   }
 
-  private async saveAndPublish(mission: Mission): Promise<void> {
-    await this.deps.missionRepository.save(mission);
+  private async saveAndPublish(ctx: TenantContext, mission: Mission): Promise<void> {
+    await this.deps.missionRepository.save(ctx, mission);
     for (const event of mission.domainEvents) {
       await this.deps.eventBus.publish(event);
     }

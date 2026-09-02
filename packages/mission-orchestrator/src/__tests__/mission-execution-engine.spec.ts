@@ -69,12 +69,11 @@ describe('MissionExecutionEngine', () => {
 
   it('plans and completes a mission with dependent tasks', async () => {
     const mission = createTestMission({ status: 'PLANNING' });
-    await missionRepository.save(mission);
-
     const ctx = createTenantContext('tenant-1', 'corr-1');
+    await missionRepository.save(ctx, mission);
     await engine.executeMission(ctx, mission.id as string);
 
-    const updated = await missionRepository.load(ctx.tenantId, mission.id as string);
+    const updated = await missionRepository.findById(ctx, mission.id as string);
     expect(updated?.status).toBe('COMPLETED');
     expect(updated?.tasks).toHaveLength(2);
     expect(updated?.tasks.every((t) => t.status === 'COMPLETED')).toBe(true);
@@ -83,14 +82,12 @@ describe('MissionExecutionEngine', () => {
 
   it('blocks mission when a task fails and invokes compensation', async () => {
     const mission = createTestMission({ status: 'PLANNING' });
-    await missionRepository.save(mission);
-
-    agentExecutor.setStatus('FAILED');
-
     const ctx = createTenantContext('tenant-1', 'corr-1');
+    await missionRepository.save(ctx, mission);
+    agentExecutor.setStatus('FAILED');
     await engine.executeMission(ctx, mission.id as string);
 
-    const updated = await missionRepository.load(ctx.tenantId, mission.id as string);
+    const updated = await missionRepository.findById(ctx, mission.id as string);
     expect(updated?.status).toBe('BLOCKED');
     expect(compensationPort.executed.length).toBeGreaterThan(0);
     expect(eventBus.published.some((e) => e.eventType === 'MissionBlocked')).toBe(true);
@@ -98,22 +95,21 @@ describe('MissionExecutionEngine', () => {
 
   it('pauses mission when a task awaits approval', async () => {
     const mission = createTestMission({ status: 'PLANNING' });
-    await missionRepository.save(mission);
-
-    agentExecutor.setStatus('AWAITING_APPROVAL');
-
     const ctx = createTenantContext('tenant-1', 'corr-1');
+    await missionRepository.save(ctx, mission);
+    agentExecutor.setStatus('AWAITING_APPROVAL');
     await engine.executeMission(ctx, mission.id as string);
 
-    const updated = await missionRepository.load(ctx.tenantId, mission.id as string);
+    const updated = await missionRepository.findById(ctx, mission.id as string);
     expect(updated?.status).toBe('PAUSED');
     expect(notificationPort.requests.length).toBe(1);
     expect(workflowClient.signaled.length).toBe(0);
   });
 
   it('throws on cross-tenant task execution', async () => {
+    const ctx1 = createTenantContext('tenant-1', 'corr-1');
     const mission = createTestMission({ tenantId: 'tenant-1', status: 'PLANNING' });
-    await missionRepository.save(mission);
+    await missionRepository.save(ctx1, mission);
 
     const ctx = createTenantContext('tenant-2', 'corr-1');
     await expect(engine.executeMission(ctx, mission.id as string)).rejects.toThrow();

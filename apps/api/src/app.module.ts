@@ -3,6 +3,7 @@ import { AdminModule } from './admin/admin.module';
 import { ApprovalModule } from './approval/approval.module';
 import { GraphInboundModule } from './graph-inbound/graph-inbound.module';
 import { IdentityModule } from './identity/identity.module';
+import { MissionModule } from './mission/mission.module';
 import { HealthController } from './health.controller';
 
 /**
@@ -11,7 +12,7 @@ import { HealthController } from './health.controller';
  * will be added as independent NestJS modules in subsequent implementation phases.
  */
 @Module({
-  imports: [GraphInboundModule, ApprovalModule, AdminModule, IdentityModule],
+  imports: [GraphInboundModule, ApprovalModule, AdminModule, IdentityModule, MissionModule],
   controllers: [HealthController],
   providers: [],
 })

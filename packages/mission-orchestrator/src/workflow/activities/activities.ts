@@ -20,6 +20,10 @@ export async function planMissionActivity(ctx: TenantContext, missionId: string)
   return getEngine().planMission(ctx, missionId);
 }
 
+export async function executeMissionStepActivity(ctx: TenantContext, missionId: string) {
+  return getEngine().executeMissionStep(ctx, missionId);
+}
+
 export async function executeTaskActivity(
   ctx: TenantContext,
   mission: Mission,
@@ -50,7 +54,7 @@ export async function compensateActivity(
   return getEngine()['compensateIfNeeded'](ctx, mission, task, result);
 }
 
-export async function checkpointActivity(_ctx: TenantContext, _mission: Mission): Promise<void> {
+export async function checkpointActivity(_ctx: TenantContext, _missionId: string): Promise<void> {
   // The engine already persists after every significant step.
   // This activity is a durable no-op hook for workflow checkpoints.
 }
