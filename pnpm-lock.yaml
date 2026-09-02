@@ -176,6 +176,9 @@ importers:
       '@projectx/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@projectx/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
       '@projectx/infrastructure':
         specifier: workspace:*
         version: link:../../packages/infrastructure
@@ -417,6 +420,31 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  packages/identity:
+    dependencies:
+      '@projectx/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@projectx/infrastructure':
+        specifier: workspace:*
+        version: link:../infrastructure
+      '@projectx/shared':
+        specifier: workspace:*
+        version: link:../shared
+      pg:
+        specifier: ^8.12.0
+        version: 8.23.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.21.0
       typescript:
         specifier: ^5.5.0
         version: 5.9.3

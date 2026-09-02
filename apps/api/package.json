@@ -18,6 +18,7 @@
     "@projectx/application": "workspace:*",
     "@projectx/conversation": "workspace:*",
     "@projectx/domain": "workspace:*",
+    "@projectx/identity": "workspace:*",
     "@projectx/infrastructure": "workspace:*",
     "@projectx/mission-orchestrator": "workspace:*",
     "@projectx/outreach": "workspace:*",

@@ -21,6 +21,7 @@
       "@projectx/ai-runtime": ["./packages/ai-runtime/src"],
       "@projectx/application": ["./packages/application/src"],
       "@projectx/shared": ["./packages/shared/src"],
+      "@projectx/identity": ["./packages/identity/src"],
       "@projectx/intelligence": ["./packages/intelligence/src"],
       "@projectx/mission-orchestrator": ["./packages/mission-orchestrator/src"],
       "@projectx/outreach": ["./packages/outreach/src"],

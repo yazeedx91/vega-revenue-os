@@ -13,6 +13,7 @@
     { "path": "../../packages/application" },
     { "path": "../../packages/conversation" },
     { "path": "../../packages/domain" },
+    { "path": "../../packages/identity" },
     { "path": "../../packages/infrastructure" },
     { "path": "../../packages/mission-orchestrator" },
     { "path": "../../packages/outreach" },
