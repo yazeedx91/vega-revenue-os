@@ -121,4 +121,11 @@ export class MissionController {
     await this.orchestrator.cancelMission(ctx, { missionId: asMissionId(id), reason: 'User requested' });
     return { missionId: id, status: 'CANCELLED' };
   }
+
+  @Post(':id/replan')
+  async replan(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    const ctx = buildContext(user);
+    await this.orchestrator.replanMission(ctx, { missionId: asMissionId(id) });
+    return { missionId: id, status: 'REPLANNING' };
+  }
 }

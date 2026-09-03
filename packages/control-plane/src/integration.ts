@@ -1,10 +1,12 @@
 import type { TenantContext } from '@projectx/domain';
 import { asCorrelationId, asTenantId } from '@projectx/shared';
 import type { AgentContract } from '@projectx/shared';
-import type { IAgentRegistry, IPolicyClient, PolicyDecision } from '@projectx/ai-runtime';
+import { toResolvedAgent } from '@projectx/ai-runtime';
+import type { IAgentRegistry, IPolicyClient, PolicyDecision, ResolvedAgent } from '@projectx/ai-runtime';
 import type { AIExecutionRequest } from '@projectx/shared';
 import type { PolicyEvaluationService } from './application';
 import type { IAgentRepository, ICapabilityRepository } from './ports';
+import type { AgentVersion } from './domain';
 
 export interface ControlPlaneAgentRegistryDependencies {
   readonly agentRepository: IAgentRepository;
@@ -16,6 +18,12 @@ export interface ControlPlaneRegistryCapability {
   readonly allowedTools: string[];
 }
 
+export class AmbiguousCapabilityError extends Error {
+  constructor(public readonly capabilityId: string) {
+    super(`Multiple active agents claim capability ${capabilityId}; selection is ambiguous`);
+  }
+}
+
 export class ControlPlaneAgentRegistry implements IAgentRegistry {
   constructor(private readonly deps: ControlPlaneAgentRegistryDependencies) {}
 
@@ -23,10 +31,10 @@ export class ControlPlaneAgentRegistry implements IAgentRegistry {
     ctx: TenantContext,
     agentId: string,
     version?: string,
-  ): Promise<AgentContract | null> {
+  ): Promise<ResolvedAgent | null> {
     const activeVersion = await this.deps.agentRepository.getActiveVersion(ctx, agentId, version);
     if (!activeVersion) return null;
-    return activeVersion.definition;
+    return this.mapToResolvedAgent(activeVersion);
   }
 
   async getCapability(
@@ -43,6 +51,28 @@ export class ControlPlaneAgentRegistry implements IAgentRegistry {
       capabilityId: capability.capabilityId,
       allowedTools: capability.allowedTools,
     };
+  }
+
+  async selectActiveAgentForCapability(ctx: TenantContext, capabilityId: string): Promise<ResolvedAgent> {
+    const activeVersions = await this.deps.agentRepository.listActiveVersions(ctx);
+    const matching = activeVersions.filter((v) => v.definition.capabilities.includes(capabilityId));
+    if (matching.length === 0) {
+      throw new Error(`No active agent supports capability ${capabilityId}`);
+    }
+    if (matching.length > 1) {
+      throw new AmbiguousCapabilityError(capabilityId);
+    }
+    return this.mapToResolvedAgent(matching[0]);
+  }
+
+  private mapToResolvedAgent(version: AgentVersion): ResolvedAgent {
+    const contract: AgentContract = {
+      ...version.definition,
+      agentId: version.agentId,
+      lifecycle: version.lifecycle,
+      version: version.version,
+    };
+    return toResolvedAgent(contract, version.implementationKey, version.isSystem, version.tenantId);
   }
 }
 

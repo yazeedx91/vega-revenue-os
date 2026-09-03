@@ -15,12 +15,13 @@ const activityOptions = {
 
 type MissionActivities = Pick<
   typeof missionActivities,
-  'planMissionActivity' | 'executeMissionStepActivity' | 'checkpointActivity'
+  'planMissionActivity' | 'executeMissionStepActivity' | 'checkpointActivity' | 'replanMissionActivity'
 >;
 
 const {
   planMissionActivity: planMission,
   executeMissionStepActivity: executeMissionStep,
+  replanMissionActivity: replanMission,
   checkpointActivity: checkpoint,
 } = proxyActivities<MissionActivities>(activityOptions);
 
@@ -69,6 +70,13 @@ export async function MissionWorkflow(input: MissionWorkflowInput): Promise<void
       status = { ...status, status: 'PAUSED' };
       controlRequest = undefined;
       await condition(() => controlRequest !== undefined);
+      continue;
+    }
+
+    if (controlRequest?.action === 'REPLAN') {
+      await replanMission(ctx, input.missionId);
+      status = { ...status, status: 'EXECUTING' };
+      controlRequest = undefined;
       continue;
     }
 

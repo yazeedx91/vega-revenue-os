@@ -20,6 +20,6 @@ export interface ApprovalDecisionSignal {
 }
 
 export interface MissionControlSignal {
-  action: 'PAUSE' | 'RESUME' | 'CANCEL';
+  action: 'PAUSE' | 'RESUME' | 'CANCEL' | 'REPLAN';
   reason?: string;
 }

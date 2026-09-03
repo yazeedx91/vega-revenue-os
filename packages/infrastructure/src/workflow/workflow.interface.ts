@@ -52,6 +52,7 @@ export interface IWorkflowClient {
     queryName: string,
   ): Promise<TResult>;
   cancel(ctx: TenantContext, ref: WorkflowExecutionRef): Promise<void>;
+  close?(): Promise<void>;
 }
 
 export interface WorkflowExecutionRef {

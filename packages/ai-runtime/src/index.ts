@@ -1,6 +1,9 @@
 export * from './agent-executor/agent-executor.interface';
 export * from './agent-executor/agent-executor';
 export * from './agent-executor/agent-registry.interface';
+export * from './agent-executor/resolved-agent';
+export * from './agent-executor/agent-implementation.interface';
+export * from './agent-executor/agent-implementation-registry.interface';
 export * from './context-assembler/context-assembler.interface';
 export * from './context-assembler/context-assembler';
 export * from './llm-client/llm-client.interface';
@@ -29,3 +32,5 @@ export * from './test-doubles/fake-llm-provider';
 export * from './test-doubles/fake-policy-client';
 export * from './test-doubles/fake-tool-gateway';
 export * from './test-doubles/no-op-telemetry';
+export * from './test-doubles/fake-implementation-registry';
+

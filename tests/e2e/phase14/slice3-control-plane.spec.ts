@@ -7,6 +7,7 @@ import {
   AgentExecutor,
   ContextAssembler,
   InMemoryCheckpointStore,
+  FakeImplementationRegistry,
   InMemoryKnowledgeRetriever,
   InMemoryMemoryRetriever,
   PolicyAwareDecisionEngine,
@@ -103,6 +104,7 @@ describe('Slice 3 Control Plane E2E', () => {
 
     agentExecutor = new AgentExecutor({
       agentRegistry,
+      implementationRegistry: new FakeImplementationRegistry(),
       policyClient,
       contextAssembler: new ContextAssembler({
         memoryRetriever: new InMemoryMemoryRetriever(),
@@ -384,11 +386,12 @@ async function seedTenantAgent(client: PostgresClient, ctx: TenantContext): Prom
       `INSERT INTO control_plane.agent_versions
          (version_id, agent_id, tenant_id, is_system, version, lifecycle, name, role, description,
           capabilities, tools, policies, model_policy, memory_policy, knowledge_policy,
-          autonomy_level_default, evaluation_policy, owner, created_at, updated_at)
+          autonomy_level_default, evaluation_policy, owner, implementation_key, created_at, updated_at)
        VALUES ($1, $2, current_setting('app.current_tenant', true), false, $3, $4, $5, $6, $7,
-               $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
+              $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
        ON CONFLICT (version_id) DO UPDATE SET
          lifecycle = EXCLUDED.lifecycle,
+         implementation_key = EXCLUDED.implementation_key,
          updated_at = NOW()`,
       [
         `${ctx.tenantId}:${AGENT_ID}:1.0.0`,
@@ -407,7 +410,10 @@ async function seedTenantAgent(client: PostgresClient, ctx: TenantContext): Prom
         5,
         JSON.stringify({}),
         'slice3-test',
+        'fake.agent.v1',
       ],
     );
   });
 }
+
+

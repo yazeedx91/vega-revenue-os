@@ -32,6 +32,18 @@ export class MissionApproved extends DomainEvent<{ missionId: MissionId; approve
   }
 }
 
+export class MissionReplanned extends DomainEvent<{ missionId: MissionId; planVersion: number }> {
+  constructor(
+    eventId: EventId,
+    tenantId: TenantId,
+    correlationId: CorrelationId,
+    payload: { missionId: MissionId; planVersion: number },
+    producer = 'mission-management',
+  ) {
+    super(eventId, 'MissionReplanned', '1', new Date(), tenantId, correlationId, producer, payload);
+  }
+}
+
 export class MissionStarted extends DomainEvent<{ missionId: MissionId }> {
   constructor(
     eventId: EventId,

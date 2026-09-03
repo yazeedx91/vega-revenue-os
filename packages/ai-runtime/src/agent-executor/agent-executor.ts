@@ -8,31 +8,32 @@ import type {
   CorrelationId,
   ExecutionOutcome,
   ModelUsage,
-  ToolCallRequest,
-  ToolCallResult,
 } from '@projectx/shared';
 import type { IAgentExecutor } from './agent-executor.interface';
+import type { IAgentImplementation, AgentImplementationRuntime } from './agent-implementation.interface';
+import type { IAgentImplementationRegistry } from './agent-implementation-registry.interface';
 import type { IAgentRegistry } from './agent-registry.interface';
+import type { ResolvedAgent } from './resolved-agent';
 import type { IContextAssembler } from '../context-assembler/context-assembler.interface';
-import type { IDecisionEngine } from '../decision/decision.interface';
 import type { IKnowledgeRetriever } from '../knowledge/knowledge-retriever.interface';
 import type { IMemoryRetriever } from '../memory/memory-retriever.interface';
 import type { IOutputValidator } from '../output-validator/output-validator.interface';
 import type { IPolicyClient, PolicyDecision } from '../policy-client/policy-client.interface';
-import type { IReasoningEngine } from '../reasoning/reasoning.interface';
+import type { IReasoningEngine, ReasoningOutput, ReasoningRequest } from '../reasoning/reasoning.interface';
 import type { IToolClient } from '../tool-client/tool-client.interface';
+import type { DecisionOutput, DecisionRequest } from '../decision/decision.interface';
 import { ExecutionState, type ExecutionFailure, type FailureClassification } from '../execution-state/execution-state';
 import type { ICheckpointStore } from '../execution-state/checkpoint-store.interface';
-import type { AgentContract } from '@projectx/shared';
 
 export interface AgentExecutorDeps {
   readonly agentRegistry: IAgentRegistry;
+  readonly implementationRegistry: IAgentImplementationRegistry;
   readonly policyClient: IPolicyClient;
   readonly contextAssembler: IContextAssembler;
   readonly memoryRetriever: IMemoryRetriever;
   readonly knowledgeRetriever: IKnowledgeRetriever;
   readonly reasoningEngine: IReasoningEngine;
-  readonly decisionEngine: IDecisionEngine;
+  readonly decisionEngine: import('../decision/decision.interface').IDecisionEngine;
   readonly toolClient: IToolClient;
   readonly outputValidator: IOutputValidator;
   readonly telemetry: ITelemetry;
@@ -63,34 +64,23 @@ export class AgentExecutor implements IAgentExecutor {
     try {
       ensureSameTenant(tenantCtx, request.tenantId);
       this.checkDeadline(request.deadline, startedAt);
+      this.checkBudget(request.budget);
 
       const agent = await this.deps.telemetry.span('agent.lookup', () =>
         this.requireAgent(tenantCtx, request.agentId, request.agentVersion),
       );
 
-      this.validateCapabilities(agent, request.capabilities);
+      this.validateCapabilities(agent.contract, request.capabilities);
 
       const policyDecision = await this.deps.telemetry.span('policy.evaluate', () =>
         this.deps.policyClient.evaluate(tenantCtx, request),
       );
 
-      if (policyDecision.outcome === 'DENY') {
-        return this.fail(
-          state,
-          request.correlationId,
-          'POLICY_DENIED',
-          'Policy denied execution',
-          false,
-          startedAt,
-          policyDecision,
-        );
-      }
-
       const promptContext = await this.deps.telemetry.span('context.assemble', () =>
         this.deps.contextAssembler.assemble(tenantCtx, request),
       );
 
-      const reasoning = await this.deps.telemetry.span('reasoning', () =>
+      const reasoningOutput = await this.deps.telemetry.span('reasoning', () =>
         this.deps.reasoningEngine.reason(tenantCtx, {
           execution: request,
           promptContext,
@@ -98,127 +88,85 @@ export class AgentExecutor implements IAgentExecutor {
           correlationId: request.correlationId,
           idempotencyKey: request.idempotencyKey,
           deadline: request.deadline,
-        }),
+        } as ReasoningRequest),
       );
 
-      const decision = await this.deps.telemetry.span('decision', () =>
+      const decisionOutput = await this.deps.telemetry.span('decision', () =>
         this.deps.decisionEngine.decide(tenantCtx, {
           execution: request,
-          reasoning,
+          reasoning: reasoningOutput,
           policyDecision,
           correlationId: request.correlationId,
           idempotencyKey: request.idempotencyKey,
           deadline: request.deadline,
-        }),
+        } as DecisionRequest),
       );
 
-      if (decision.outcome === 'DENY') {
+      if (decisionOutput.outcome === 'DENY') {
         return this.fail(
           state,
           request.correlationId,
           'POLICY_DENIED',
-          'Decision engine denied execution',
+          decisionOutput.rationale,
           false,
           startedAt,
           policyDecision,
         );
       }
 
-      if (decision.outcome === 'REQUIRE_APPROVAL') {
+      if (decisionOutput.outcome === 'REQUIRE_APPROVAL') {
         state.transition('AWAITING_APPROVAL');
         await this.saveCheckpoint(state);
         return this.result(
           state,
           request.correlationId,
           'AWAITING_APPROVAL',
-          'Awaiting explicit approval',
+          decisionOutput.rationale,
           startedAt,
           policyDecision,
-          reasoning.evidence,
+          reasoningOutput.evidence,
         );
       }
 
-      if (reasoning.modelUsage) {
-        this.trackModelUsage(state, reasoning.modelUsage, startedAt);
-      }
-
-      if (!state.isWithinBudget(request.budget)) {
+      const implementation = this.deps.implementationRegistry.resolve(agent.implementationKey);
+      if (!implementation) {
         return this.fail(
           state,
           request.correlationId,
-          'BUDGET_EXHAUSTED',
-          'Execution exceeded allocated budget',
+          'NON_RETRYABLE_BUSINESS_FAILURE',
+          `Implementation not found for key ${agent.implementationKey}`,
           false,
           startedAt,
           policyDecision,
         );
       }
 
-      const toolResults = await this.executeToolCalls(
-        state,
-        request,
-        agent,
-        decision.allowedCapabilities,
-        reasoning.proposedActions ?? [],
-        policyDecision,
-        tenantCtx,
+      const runtime: AgentImplementationRuntime = {
+        tenantContext: tenantCtx,
+        agent: { contract: agent.contract, implementationKey: agent.implementationKey },
+        promptContext,
+        reasoningEngine: this.deps.reasoningEngine,
+        decisionEngine: this.deps.decisionEngine,
+        toolClient: this.deps.toolClient,
+        outputValidator: this.deps.outputValidator,
+        contextAssembler: this.deps.contextAssembler,
+        memoryRetriever: this.deps.memoryRetriever,
+        knowledgeRetriever: this.deps.knowledgeRetriever,
+        telemetry: this.deps.telemetry,
+        checkpointStore: this.deps.checkpointStore,
+        executionState: state,
+        reasoningOutput,
+        startedAt,
+      };
+
+      const specialistResult = await this.deps.telemetry.span('specialist.execute', () =>
+        implementation.execute(request, runtime),
       );
 
-      for (const toolResult of toolResults) {
-        if (toolResult.status !== 'SUCCESS') {
-          const classification = this.classifyToolFailure(toolResult);
-          return this.fail(
-            state,
-            request.correlationId,
-            classification,
-            toolResult.error?.message ?? `Tool ${toolResult.toolCallId} failed`,
-            toolResult.error?.retryable ?? false,
-            startedAt,
-            policyDecision,
-          );
-        }
-      }
-
-      const proposedOutput = {
-        rationale: reasoning.rationale,
-        conclusion: reasoning.conclusion,
-        toolResults,
-      };
-      const validation = await this.deps.outputValidator.validate(tenantCtx, {
-        execution: request,
-        proposedOutput,
-        toolResults,
-        correlationId: request.correlationId,
-        idempotencyKey: request.idempotencyKey,
-        deadline: request.deadline,
-      });
-
-      if (!validation.valid) {
-        const schema = validation.schemaViolations ?? [];
-        const policy = validation.policyViolations ?? [];
-        return this.fail(
-          state,
-          request.correlationId,
-          'VALIDATION_ERROR',
-          `Output validation failed: ${[...schema, ...policy].join('; ')}`,
-          false,
-          startedAt,
-          policyDecision,
-        );
-      }
-
-      state.transition('COMPLETED');
+      state.transition(specialistResult.status);
       await this.saveCheckpoint(state);
 
-      return this.result(
-        state,
-        request.correlationId,
-        'COMPLETED',
-        'Execution completed successfully',
-        startedAt,
-        policyDecision,
-        reasoning.evidence,
-      );
+      return specialistResult;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return this.fail(
@@ -244,7 +192,7 @@ export class AgentExecutor implements IAgentExecutor {
     ctx: TenantContext,
     agentId: string,
     version?: string,
-  ): Promise<AgentContract> {
+  ): Promise<ResolvedAgent> {
     const agent = await this.deps.agentRegistry.getAgent(ctx, agentId, version);
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
@@ -258,7 +206,7 @@ export class AgentExecutor implements IAgentExecutor {
     return agent;
   }
 
-  private validateCapabilities(agent: AgentContract, required: string[]): void {
+  private validateCapabilities(agent: import('@projectx/shared').AgentContract, required: string[]): void {
     const available = new Set(agent.capabilities);
     const missing = required.filter((cap) => !available.has(cap));
     if (missing.length > 0) {
@@ -272,81 +220,16 @@ export class AgentExecutor implements IAgentExecutor {
     }
   }
 
-  private trackModelUsage(state: ExecutionState, usage: ModelUsage, startedAt: Date): void {
-    const durationSeconds = (Date.now() - startedAt.getTime()) / 1000;
-    state.consumeBudget(
-      usage.inputTokens + usage.outputTokens,
-      usage.costUsd,
-      durationSeconds,
-    );
-    this.deps.telemetry.histogram('llm.latency', durationSeconds, {
-      model: usage.model,
-    });
-  }
-
-  private async executeToolCalls(
-    state: ExecutionState,
-    request: AIExecutionRequest,
-    agent: AgentContract,
-    allowedCapabilities: string[],
-    proposedActions: import('../reasoning/reasoning.interface').ProposedAction[],
-    policyDecision: PolicyDecision,
-    tenantCtx: TenantContext,
-  ): Promise<ToolCallResult[]> {
-    const results: ToolCallResult[] = [];
-
-    for (const action of proposedActions) {
-      if (!agent.tools.includes(action.toolId)) {
-        throw new Error(`Tool ${action.toolId} is not in agent ${agent.agentId} tool allow-list`);
-      }
-
-      const toolRequest: ToolCallRequest = {
-        toolCallId: `${request.executionId}-${action.actionId}`,
-        toolId: action.toolId,
-        toolVersion: action.toolVersion,
-        tenantId: request.tenantId,
-        missionId: request.missionId,
-        agentId: request.agentId,
-        agentVersion: request.agentVersion,
-        executionId: request.executionId,
-        taskId: request.taskId,
-        correlationId: request.correlationId,
-        idempotencyKey: request.idempotencyKey,
-        authorization: {
-          policyDecisionId: policyDecision.decisionId,
-          decision: policyDecision.outcome,
-          capabilities: allowedCapabilities,
-          expiresAt: policyDecision.expiresAt,
-        },
-        riskCategory: action.riskCategory,
-        input: action.input,
-        timeoutSeconds: 30,
-      };
-
-      const result = await this.deps.toolClient.call(toolRequest);
-      state.recordToolResult(result);
-      results.push(result);
+  private checkBudget(budget: AIExecutionRequest['budget']): void {
+    if (!budget) return;
+    if (budget.maxCostUsd !== undefined && budget.maxCostUsd <= 0) {
+      throw new Error('budget exhausted (cost)');
     }
-
-    return results;
-  }
-
-  private classifyToolFailure(toolResult: {
-    status: string;
-    error?: { retryable: boolean };
-  }): FailureClassification {
-    switch (toolResult.status) {
-      case 'TIMEOUT':
-        return toolResult.error?.retryable ? 'TIMEOUT' : 'NON_RETRYABLE_BUSINESS_FAILURE';
-      case 'PROVIDER_ERROR':
-        return toolResult.error?.retryable ? 'TRANSIENT_PROVIDER_ERROR' : 'TOOL_FAILURE';
-      case 'POLICY_DENIED':
-      case 'UNAUTHORIZED':
-        return 'AUTHORIZATION_FAILURE';
-      case 'VALIDATION_ERROR':
-        return 'VALIDATION_ERROR';
-      default:
-        return 'TOOL_FAILURE';
+    if (budget.maxTokens !== undefined && budget.maxTokens <= 0) {
+      throw new Error('budget exhausted (tokens)');
+    }
+    if (budget.maxDurationSeconds !== undefined && budget.maxDurationSeconds <= 0) {
+      throw new Error('budget exhausted (time)');
     }
   }
 
@@ -424,3 +307,6 @@ export class AgentExecutor implements IAgentExecutor {
     );
   }
 }
+
+
+

@@ -1,4 +1,5 @@
 import type { IAgentExecutor, IAgentRegistry, IPlanner } from '@projectx/ai-runtime';
+import { toResolvedAgent } from '@projectx/ai-runtime';
 import type { TenantContext } from '@projectx/domain';
 import type {
   AgentContract,
@@ -37,30 +38,32 @@ export class StubAgentExecutor implements IAgentExecutor {
   }
 }
 
+const stubAgentContract: AgentContract = {
+  agentId: 'agent-1',
+  version: '1.0.0',
+  name: 'Stub Agent',
+  role: 'researcher',
+  description: 'Stub agent for worker scaffolding',
+  capabilities: ['research'],
+  tools: [],
+  policies: [],
+  modelPolicy: { preferredModelFamily: 'stub', maxCostPerTaskUsd: 1, maxTokensPerTask: 1000 },
+  memoryPolicy: { read: [], write: [], validationRequired: false },
+  knowledgePolicy: { read: [], write: [] },
+  autonomyLevelDefault: 0.5,
+  evaluationPolicy: { criteria: [], minScore: 0 },
+  lifecycle: 'ACTIVE',
+  owner: 'system',
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
 export class StubAgentRegistry implements IAgentRegistry {
-  async getAgent(_ctx: TenantContext, agentId: string, _version?: string): Promise<AgentContract | null> {
+  async getAgent(_ctx: TenantContext, agentId: string, _version?: string) {
     if (agentId !== 'agent-1') {
       return null;
     }
-    return {
-      agentId: 'agent-1',
-      version: '1.0.0',
-      name: 'Stub Agent',
-      role: 'researcher',
-      description: 'Stub agent for worker scaffolding',
-      capabilities: ['research'],
-      tools: [],
-      policies: [],
-      modelPolicy: { preferredModelFamily: 'stub', maxCostPerTaskUsd: 1, maxTokensPerTask: 1000 },
-      memoryPolicy: { read: [], write: [], validationRequired: false },
-      knowledgePolicy: { read: [], write: [] },
-      autonomyLevelDefault: 0.5,
-      evaluationPolicy: { criteria: [], minScore: 0 },
-      lifecycle: 'ACTIVE',
-      owner: 'system',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    return toResolvedAgent(stubAgentContract, 'stub.agent.v1');
   }
 
   async getCapability(_tenantId: string, _capabilityId: string): Promise<{
@@ -74,15 +77,18 @@ export class StubAgentRegistry implements IAgentRegistry {
 export class StubMissionPlanner implements IPlanner {
   async plan(_ctx: TenantContext, request: PlanningRequest): Promise<PlanContract> {
     const mission = request.mission;
-    const taskId = `${mission.missionId}-research-task`;
+    const previousVersion = mission.plan?.version ?? 0;
+    const version = previousVersion > 0 ? previousVersion + 1 : 1;
+    const planId = `${mission.missionId}-plan-v${version}`;
+    const taskId = `${mission.missionId}-research-task-v${version}`;
     const phase: PlanPhase = {
-      phaseId: `${mission.missionId}-phase-1`,
+      phaseId: `${mission.missionId}-phase-v${version}`,
       name: 'Research',
       tasks: [
         {
           taskId,
           missionId: mission.missionId,
-          planId: `${mission.missionId}-plan`,
+          planId,
           agentId: 'agent-1',
           agentVersion: '1.0.0',
           taskType: 'research',
@@ -94,9 +100,9 @@ export class StubMissionPlanner implements IPlanner {
       ],
     };
     return {
-      planId: `${mission.missionId}-plan`,
+      planId,
       missionId: mission.missionId,
-      version: 1,
+      version,
       objectives: [mission.objective],
       phases: [phase],
       approvalGates: [],

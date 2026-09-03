@@ -72,6 +72,8 @@ function noOpWorkflowClient(): IWorkflowClient {
           generateIdempotencyKey: (hint: string) => asIdempotencyKey(`${hint}:${randomUUID()}`),
           generateEventId: () => asEventId(randomUUID()),
           generateCorrelationId: () => asCorrelationId(randomUUID()),
+          workflowType: process.env.MISSION_WORKFLOW_TYPE ?? 'MissionWorkflow',
+          taskQueue: process.env.MISSION_TASK_QUEUE ?? 'mission-execution',
         }),
       inject: ['MISSION_REPOSITORY', 'WORKFLOW_CLIENT'],
     },

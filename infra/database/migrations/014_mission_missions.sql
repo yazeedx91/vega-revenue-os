@@ -4,8 +4,12 @@
 
 CREATE SCHEMA IF NOT EXISTS mission;
 
+-- Ensure the normalized core mission aggregate table. Drop the legacy JSONB
+-- payload version created by 001 so the Slice 2 schema takes precedence.
+DROP TABLE IF EXISTS mission.missions CASCADE;
+
 -- Core mission aggregate.
-CREATE TABLE IF NOT EXISTS mission.missions (
+CREATE TABLE mission.missions (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     owner_user_id UUID NOT NULL,

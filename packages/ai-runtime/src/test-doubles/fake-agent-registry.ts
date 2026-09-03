@@ -1,12 +1,11 @@
 import type { TenantContext } from '@projectx/domain';
 import type { TenantId } from '@projectx/shared';
-import type { AgentContract } from '@projectx/shared';
-import type { IAgentRegistry } from '../agent-executor/agent-registry.interface';
+import type { IAgentRegistry, ResolvedAgent } from '../agent-executor/agent-registry.interface';
 
 export class FakeAgentRegistry implements IAgentRegistry {
-  private readonly agents = new Map<string, AgentContract>();
+  private readonly agents = new Map<string, ResolvedAgent>();
 
-  register(tenantId: TenantId, agent: AgentContract): void {
+  register(tenantId: TenantId, agent: ResolvedAgent): void {
     this.agents.set(`${tenantId}:${agent.agentId}`, agent);
   }
 
@@ -14,7 +13,7 @@ export class FakeAgentRegistry implements IAgentRegistry {
     ctx: TenantContext,
     agentId: string,
     _version?: string,
-  ): Promise<AgentContract | null> {
+  ): Promise<ResolvedAgent | null> {
     const key = `${ctx.tenantId}:${agentId}`;
     return this.agents.get(key) ?? null;
   }

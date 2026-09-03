@@ -21,6 +21,7 @@ import type { IWorkflowClient, WorkflowExecutionRef, WorkflowStartOptions, Workf
 import { NoOpTelemetry, PostgresAuditLog, PostgresClient } from '@projectx/infrastructure';
 import { Pool } from 'pg';
 import type { CorrelationId, TenantId, ToolCallRequest, ToolCallResult } from '@projectx/shared';
+import { SpecialistImplementationRegistry } from '@projectx/specialist-agents';
 import { asCorrelationId, asEventId, asIdempotencyKey } from '@projectx/shared';
 import {
   AgentExecutor,
@@ -161,6 +162,7 @@ const agentExecutor = new AgentExecutor({
   }),
   telemetry: new NoOpTelemetry(),
   checkpointStore: new InMemoryCheckpointStore(),
+  implementationRegistry: new SpecialistImplementationRegistry(),
 });
 
 const missionRepository = new PostgresMissionRepository({ pool });
@@ -209,3 +211,7 @@ export {
   evaluateCompletionActivity,
   checkpointActivity,
 };
+
+
+
+

@@ -1,5 +1,6 @@
 import type { TenantContext } from '@projectx/domain';
 import type { AgentContract, CapabilityId } from '@projectx/shared';
+import { toResolvedAgent } from '@projectx/ai-runtime';
 import type { IAgentRegistry } from '@projectx/ai-runtime';
 
 export const RESEARCH_AGENT_CONTRACTS: AgentContract[] = [
@@ -158,8 +159,9 @@ export const RESEARCH_AGENT_CONTRACTS: AgentContract[] = [
 ];
 
 export class IntelligenceAgentRegistry implements IAgentRegistry {
-  async getAgent(_ctx: TenantContext, agentId: string, _version?: string): Promise<AgentContract | null> {
-    return RESEARCH_AGENT_CONTRACTS.find((a) => a.agentId === agentId) ?? null;
+  async getAgent(_ctx: TenantContext, agentId: string, _version?: string) {
+    const contract = RESEARCH_AGENT_CONTRACTS.find((a) => a.agentId === agentId);
+    return contract ? toResolvedAgent(contract, 'intelligence.research.v1') : null;
   }
 
   async getCapability(_tenantId: string, capabilityId: string): Promise<{ capabilityId: CapabilityId; allowedTools: string[] } | null> {
@@ -178,3 +180,5 @@ export class IntelligenceAgentRegistry implements IAgentRegistry {
       : null;
   }
 }
+
+

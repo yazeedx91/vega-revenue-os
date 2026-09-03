@@ -23,6 +23,8 @@ export class PostgresClient {
     return this.pool.query<T>(sql, params);
   }
 
+  async end(): Promise<void> { await this.pool.end(); }
+
   async transaction<T>(ctx: TenantContext, operation: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {

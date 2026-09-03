@@ -42,6 +42,7 @@ export function mapMissionTaskToContract(task: MissionTask): TaskContract {
     agentId: task.agentId,
     agentVersion: task.agentVersion,
     taskType: task.taskType,
+    requiredCapability: task.requiredCapability,
     status: task.status,
     input: task.input,
     output: task.output,

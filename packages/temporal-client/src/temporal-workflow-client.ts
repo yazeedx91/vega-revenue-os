@@ -99,6 +99,13 @@ export class TemporalWorkflowClient implements IWorkflowClient {
     const handle = client.workflow.getHandle(ref.workflowId, ref.runId);
     await handle.cancel();
   }
+
+  async close(): Promise<void> {
+    if (!this.clientPromise) return;
+    const client = await this.clientPromise;
+    await client.connection.close();
+    this.clientPromise = undefined;
+  }
 }
 
 export { WorkflowNotFoundError };

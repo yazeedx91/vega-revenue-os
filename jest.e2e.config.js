@@ -6,4 +6,5 @@ module.exports = {
   testMatch: ['<rootDir>/tests/e2e/phase14/**/*.spec.ts'],
   setupFilesAfterEnv: ['<rootDir>/tests/e2e/phase14/setup.ts'],
   testTimeout: 120_000,
+  runInBand: true,
 };

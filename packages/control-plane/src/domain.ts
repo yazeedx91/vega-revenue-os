@@ -34,6 +34,7 @@ export interface AgentVersion {
   readonly isSystem: boolean;
   readonly version: string;
   readonly lifecycle: AgentLifecycle;
+  readonly implementationKey: string;
   readonly definition: AgentContract;
 }
 
@@ -164,3 +165,4 @@ export function evaluateAutonomy(
 export function isActiveAgentVersion(version: AgentVersion): boolean {
   return version.lifecycle === 'ACTIVE';
 }
+

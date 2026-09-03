@@ -1,6 +1,8 @@
 import { asTenantId } from '@projectx/shared';
 import { asCorrelationId, asIdempotencyKey } from '@projectx/shared';
 import type { AIExecutionRequest, AgentContract, MissionContract, PlanContract } from '@projectx/shared';
+import { toResolvedAgent } from '../agent-executor/resolved-agent';
+import type { ResolvedAgent } from '../agent-executor/resolved-agent';
 
 export const tenantId = asTenantId('tenant-1');
 export const otherTenantId = asTenantId('tenant-2');
@@ -38,14 +40,17 @@ export function baseExecution(overrides: Partial<AIExecutionRequest> = {}): AIEx
   };
 }
 
-export function activeAgent(overrides: Partial<AgentContract> = {}): AgentContract {
-  return {
+export function activeAgent(overrides: Partial<ResolvedAgent> = {}): ResolvedAgent {
+  const now = new Date();
+  const { capabilities, tools, lifecycle, ...resolvedOverrides } = overrides as any;
+  const resolvedLifecycle = lifecycle ?? 'ACTIVE';
+  const contract: AgentContract = {
     agentId: 'agent-1',
     name: 'Research Specialist',
     role: 'researcher',
     description: 'Researches target accounts',
-    capabilities: ['research'],
-    tools: ['web_search'],
+    capabilities: capabilities ?? ['research'],
+    tools: tools ?? ['web_search'],
     policies: [],
     modelPolicy: {
       preferredModelFamily: 'gpt-4o',
@@ -56,12 +61,17 @@ export function activeAgent(overrides: Partial<AgentContract> = {}): AgentContra
     knowledgePolicy: { read: ['global'], write: [] },
     autonomyLevelDefault: 3,
     evaluationPolicy: { criteria: ['accuracy'], minScore: 0.8 },
-    lifecycle: 'ACTIVE',
+    lifecycle: resolvedLifecycle,
     owner: 'owner-1',
     version: '1.0.0',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const base = toResolvedAgent(contract, 'fake.agent.v1', false, tenantId as string);
+  return {
+    ...base,
+    ...resolvedOverrides,
+    contract: { ...base.contract, ...resolvedOverrides },
   };
 }
 

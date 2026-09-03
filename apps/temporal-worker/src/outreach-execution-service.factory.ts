@@ -133,7 +133,7 @@ async function resolveSecretValue(
   return undefined;
 }
 
-export function createDurableAdapters(): DurableAdapters {
+export async function createDurableAdapters(): Promise<DurableAdapters> {
   const config = loadControlledCommunicationConfig();
   validateControlledCommunicationConfig(config);
 
@@ -152,7 +152,7 @@ export function createDurableAdapters(): DurableAdapters {
   let rateLimiter: IRateLimiter = new InMemoryRateLimiter();
   if (config.redisUrl) {
     const redisManager = new RedisConnectionManager({ url: config.redisUrl });
-    void redisManager.connect().catch(() => {});
+    await redisManager.connect();
     const cache = new RedisCache(redisManager.getClient());
     rateLimiter = new RedisRateLimiter(redisManager.getClient());
     const dispose = async (): Promise<void> => {

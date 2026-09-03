@@ -11,6 +11,7 @@ describe('Outreach provider registry startup (integration)', () => {
 
   let pool: Pool | undefined;
   let tempTenantId: string | undefined;
+  let adapters: Awaited<ReturnType<typeof createDurableAdapters>> | undefined;
 
   beforeEach(async () => {
     process.env.DATABASE_URL = databaseUrl;
@@ -40,10 +41,12 @@ describe('Outreach provider registry startup (integration)', () => {
       );
       await pool.end();
     }
+    await adapters?.dispose?.();
+    adapters = undefined;
   });
 
   it('loads tenant email config from Postgres into the same registry used by execution', async () => {
-    const adapters = createDurableAdapters();
+    adapters = await createDurableAdapters();
     expect(adapters.pool).toBeDefined();
 
     const { executionService, providerRegistry } = await createOutreachExecutionService(

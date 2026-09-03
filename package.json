@@ -5,7 +5,7 @@
   "description": "AI-Native Autonomous Revenue Employee — TypeScript/NestJS monorepo foundation",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test",
+    "test": "pnpm --workspace-concurrency=1 -r test",
     "lint": "pnpm -r lint",
     "format": "pnpm -r format",
     "typecheck": "pnpm -r typecheck",
@@ -17,7 +17,7 @@
     "e2e:down": "pwsh -ExecutionPolicy Bypass -File infra/scripts/integration-down.ps1",
     "e2e:reset": "pwsh -ExecutionPolicy Bypass -File infra/scripts/integration-reset.ps1",
     "e2e:wait": "pwsh -ExecutionPolicy Bypass -File infra/scripts/integration-wait.ps1",
-    "test:e2e": "jest --config jest.e2e.config.js",
+    "test:e2e": "jest --config jest.e2e.config.js --runInBand",
     "validate:workspace": "tsx scripts/validation/workspace-integrity.ts",
     "security:snyk-code": "node scripts/security/snyk-scan.js code",
     "security:snyk-deps": "node scripts/security/snyk-scan.js deps",

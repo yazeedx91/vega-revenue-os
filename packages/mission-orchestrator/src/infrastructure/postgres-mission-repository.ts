@@ -127,6 +127,7 @@ export class PostgresMissionRepository implements IMissionRepository {
           agentId: t.agent_id as string,
           agentVersion: t.agent_version as string,
           taskType: t.task_type as string,
+          requiredCapability: (t.required_capability as string) ?? undefined,
           input: t.input as unknown,
           dependsOn: (depsByTask.get(t.task_id as string) ?? []).map(asTaskId),
           deadline: t.deadline ? new Date(t.deadline as string) : undefined,
@@ -181,12 +182,13 @@ export class PostgresMissionRepository implements IMissionRepository {
         [mission.id],
       );
 
-      const loadedVersion = existing.rows[0]?.version as number | undefined;
+      const dbVersion = existing.rows[0]?.version as number | undefined;
       const currentDbVersion = existing.rows[0]?.current_plan_version as number | undefined;
+      const expectedVersion = mission.loadedVersion ?? dbVersion;
       const newVersion = mission.version;
       const planVersion = mission.plan.version;
 
-      if (loadedVersion === undefined) {
+      if (expectedVersion === undefined) {
         const result = await client.query(
           `INSERT INTO mission.missions
              (id, tenant_id, owner_user_id, name, objective, icp_id, territory, channels,
@@ -226,6 +228,15 @@ export class PostgresMissionRepository implements IMissionRepository {
           );
         }
       } else {
+        if (dbVersion !== undefined && dbVersion !== expectedVersion) {
+          throw new ConcurrencyConflictError(
+            `Mission ${mission.id} was modified by another transaction`,
+            ctx.tenantId as string,
+            mission.id,
+            expectedVersion,
+          );
+        }
+
         const result = await client.query(
           `UPDATE mission.missions
            SET tenant_id = $2,
@@ -268,15 +279,15 @@ export class PostgresMissionRepository implements IMissionRepository {
             null,
             null,
             newVersion,
-            loadedVersion,
+            expectedVersion,
           ],
         );
         if (result.rowCount === 0) {
           throw new ConcurrencyConflictError(
-            `Update failed: expected version ${loadedVersion} for mission ${mission.id} is stale`,
+            `Update failed: expected version ${expectedVersion} for mission ${mission.id} is stale`,
             ctx.tenantId as string,
             mission.id,
-            loadedVersion,
+            expectedVersion,
           );
         }
       }
@@ -338,7 +349,7 @@ export class PostgresMissionRepository implements IMissionRepository {
         task.agentId,
         task.agentVersion,
         task.taskType,
-        task.agentId,
+        task.requiredCapability ?? null,
         JSON.stringify(task.input),
         task.approvalGateId ?? null,
         task.deadline ?? null,

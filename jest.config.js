@@ -18,12 +18,14 @@ module.exports = {
     '^@projectx/temporal-client$': '<rootDir>/packages/temporal-client/src',
     '^@projectx/tool-gateway$': '<rootDir>/packages/tool-gateway/src',
     '^@projectx/llm-gateway$': '<rootDir>/packages/llm-gateway/src',
+    '^@projectx/specialist-agents$': '<rootDir>/packages/specialist-agents/src',
   },
   transform: {
-    '^.+\\.tsx?$': [
+    '^.+\.tsx?$': [
       'ts-jest',
       {
         tsconfig: '<rootDir>/tsconfig.spec.json',
+        cache: false,
         diagnostics: {
           ignoreCodes: [5103],
         },

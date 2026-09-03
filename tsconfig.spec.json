@@ -5,6 +5,23 @@
     "noEmit": true,
     "isolatedModules": true,
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "emitDecoratorMetadata": true,
+    "paths": {
+      "@projectx/domain": ["./packages/domain/src"],
+      "@projectx/infrastructure": ["./packages/infrastructure/src"],
+      "@projectx/ai-runtime": ["./packages/ai-runtime/src"],
+      "@projectx/application": ["./packages/application/src"],
+      "@projectx/shared": ["./packages/shared/src"],
+      "@projectx/identity": ["./packages/identity/src"],
+      "@projectx/intelligence": ["./packages/intelligence/src"],
+      "@projectx/mission-orchestrator": ["./packages/mission-orchestrator/src"],
+      "@projectx/outreach": ["./packages/outreach/src"],
+      "@projectx/conversation": ["./packages/conversation/src"],
+      "@projectx/tool-gateway": ["./packages/tool-gateway/src"],
+      "@projectx/llm-gateway": ["./packages/llm-gateway/src"],
+      "@projectx/temporal-client": ["./packages/temporal-client/src"],
+      "@projectx/control-plane": ["./packages/control-plane/src"],
+      "@projectx/specialist-agents": ["./packages/specialist-agents/src"]
+    }
   }
 }

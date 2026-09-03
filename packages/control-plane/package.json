@@ -15,7 +15,8 @@
     "@projectx/ai-runtime": "workspace:*",
     "@projectx/domain": "workspace:*",
     "@projectx/infrastructure": "workspace:*",
-    "@projectx/shared": "workspace:*"
+    "@projectx/shared": "workspace:*",
+    "@projectx/specialist-agents": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

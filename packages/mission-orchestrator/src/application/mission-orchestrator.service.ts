@@ -2,6 +2,7 @@ import type { TenantContext } from '@projectx/domain';
 import { ensureSameTenant } from '@projectx/domain';
 import type { CorrelationId, EventId, IdempotencyKey, TenantId } from '@projectx/shared';
 import { WorkflowIdFactory } from '@projectx/shared';
+import { ConcurrencyConflictError } from '@projectx/infrastructure';
 import type { IEventBus, IWorkflowClient } from '@projectx/infrastructure';
 import type { Mission } from '@projectx/domain';
 import type { IMissionRepository } from '../ports/mission-repository.interface';
@@ -12,6 +13,7 @@ import type {
   ResumeMissionCommand,
   StartMissionCommand,
 } from './contracts';
+import type { MissionControlSignal } from '../workflow/mission-workflow.interfaces';
 
 export interface MissionOrchestratorDependencies {
   missionRepository: IMissionRepository;
@@ -21,6 +23,8 @@ export interface MissionOrchestratorDependencies {
   generateIdempotencyKey: (hint: string) => IdempotencyKey;
   generateEventId: () => EventId;
   generateCorrelationId: () => CorrelationId;
+  workflowType?: string;
+  taskQueue?: string;
 }
 
 export class MissionOrchestratorService {
@@ -47,55 +51,110 @@ export class MissionOrchestratorService {
 
     await this.saveAndPublish(ctx, mission);
 
+    const workflowType = this.deps.workflowType ?? 'MissionWorkflow';
+    const taskQueue = this.deps.taskQueue ?? 'mission-execution';
+
     await this.deps.workflowClient.start(
       ctx,
-      'MissionExecutionWorkflow',
+      workflowType,
       {
         tenantId: ctx.tenantId,
         missionId: cmd.missionId,
         correlationId,
       },
-      { timeoutSeconds: 86400, workflowId },
+      { timeoutSeconds: 86400, workflowId, taskQueue },
     );
 
     return { workflowId, correlationId };
   }
 
   async pauseMission(ctx: TenantContext, cmd: PauseMissionCommand): Promise<void> {
-    const mission = await this.loadMission(ctx, cmd.missionId);
-    const eventId = this.deps.generateEventId();
-    const correlationId = this.deps.generateCorrelationId();
-    const result = mission.pause(cmd.reason, correlationId, eventId);
-    if (!result.success) {
-      throw new Error(`Cannot pause mission: ${result.error.message}`);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const mission = await this.loadMission(ctx, cmd.missionId);
+        if (mission.status === 'PAUSED') {
+          return;
+        }
+        if (mission.status !== 'PLANNING' && mission.status !== 'EXECUTING') {
+          throw new Error(`Cannot pause mission ${cmd.missionId}: mission is ${mission.status}`);
+        }
+        const eventId = this.deps.generateEventId();
+        const correlationId = this.deps.generateCorrelationId();
+        const result = mission.pause(cmd.reason, correlationId, eventId);
+        if (!result.success) {
+          throw new Error(`Cannot pause mission: ${result.error.message}`);
+        }
+        await this.saveAndPublish(ctx, mission);
+        break;
+      } catch (err) {
+        if (err instanceof ConcurrencyConflictError && attempt < 2) {
+          continue;
+        }
+        throw err;
+      }
     }
-    await this.saveAndPublish(ctx, mission);
-    await this.signalWorkflow(ctx, cmd.missionId, 'pause', { reason: cmd.reason });
+    await this.signalWorkflow(ctx, cmd.missionId, { action: 'PAUSE', reason: cmd.reason });
   }
 
   async resumeMission(ctx: TenantContext, cmd: ResumeMissionCommand): Promise<void> {
-    const mission = await this.loadMission(ctx, cmd.missionId);
-    const eventId = this.deps.generateEventId();
-    const correlationId = this.deps.generateCorrelationId();
-    const result = mission.unblock(correlationId, eventId);
-    if (!result.success) {
-      throw new Error(`Cannot resume mission: ${result.error.message}`);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const mission = await this.loadMission(ctx, cmd.missionId);
+        if (mission.status === 'EXECUTING') {
+          return;
+        }
+        if (mission.status !== 'PAUSED') {
+          throw new Error(`Cannot resume mission ${cmd.missionId}: mission is ${mission.status}`);
+        }
+        const eventId = this.deps.generateEventId();
+        const correlationId = this.deps.generateCorrelationId();
+        const result = mission.resume(correlationId, eventId);
+        if (!result.success) {
+          throw new Error(`Cannot resume mission: ${result.error.message}`);
+        }
+        await this.saveAndPublish(ctx, mission);
+        break;
+      } catch (err) {
+        if (err instanceof ConcurrencyConflictError && attempt < 2) {
+          continue;
+        }
+        throw err;
+      }
     }
-    await this.saveAndPublish(ctx, mission);
-    await this.signalWorkflow(ctx, cmd.missionId, 'resume', {});
+    await this.signalWorkflow(ctx, cmd.missionId, { action: 'RESUME' });
   }
 
   async cancelMission(ctx: TenantContext, cmd: CancelMissionCommand): Promise<void> {
-    const mission = await this.loadMission(ctx, cmd.missionId);
-    const eventId = this.deps.generateEventId();
-    const correlationId = this.deps.generateCorrelationId();
-    const result = mission.cancel(cmd.reason, correlationId, eventId);
-    if (!result.success) {
-      throw new Error(`Cannot cancel mission: ${result.error.message}`);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const mission = await this.loadMission(ctx, cmd.missionId);
+        if (this.isTerminal(mission.status)) {
+          return;
+        }
+        const eventId = this.deps.generateEventId();
+        const correlationId = this.deps.generateCorrelationId();
+        const result = mission.cancel(cmd.reason, correlationId, eventId);
+        if (!result.success) {
+          throw new Error(`Cannot cancel mission: ${result.error.message}`);
+        }
+        await this.saveAndPublish(ctx, mission);
+        break;
+      } catch (err) {
+        if (err instanceof ConcurrencyConflictError && attempt < 2) {
+          continue;
+        }
+        throw err;
+      }
     }
-    await this.saveAndPublish(ctx, mission);
-    await this.signalWorkflow(ctx, cmd.missionId, 'cancel', { reason: cmd.reason });
-    await this.cancelWorkflow(ctx, cmd.missionId);
+    await this.signalWorkflow(ctx, cmd.missionId, { action: 'CANCEL', reason: cmd.reason });
+  }
+
+  async replanMission(ctx: TenantContext, cmd: { missionId: string }): Promise<void> {
+    const mission = await this.loadMission(ctx, cmd.missionId);
+    if (this.isTerminal(mission.status)) {
+      return;
+    }
+    await this.signalWorkflow(ctx, cmd.missionId, { action: 'REPLAN', reason: 'Dynamic replan' });
   }
 
   private async loadMission(ctx: TenantContext, missionId: string) {
@@ -118,23 +177,17 @@ export class MissionOrchestratorService {
   private async signalWorkflow(
     ctx: TenantContext,
     missionId: string,
-    signalName: string,
-    payload: unknown,
+    control: MissionControlSignal,
   ): Promise<void> {
     const ref = {
       workflowId: WorkflowIdFactory.forMission(ctx.tenantId as string, missionId),
       tenantId: ctx.tenantId,
       correlationId: ctx.correlationId as CorrelationId,
     };
-    await this.deps.workflowClient.signal(ctx, ref, signalName, payload);
+    await this.deps.workflowClient.signal(ctx, ref, 'control', control);
   }
 
-  private async cancelWorkflow(ctx: TenantContext, missionId: string): Promise<void> {
-    const ref = {
-      workflowId: WorkflowIdFactory.forMission(ctx.tenantId as string, missionId),
-      tenantId: ctx.tenantId,
-      correlationId: ctx.correlationId as CorrelationId,
-    };
-    await this.deps.workflowClient.cancel(ctx, ref);
+  private isTerminal(status: string): boolean {
+    return ['COMPLETED', 'FAILED', 'CANCELLED', 'ARCHIVED'].includes(status);
   }
 }

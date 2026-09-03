@@ -1,0 +1,27 @@
+{
+  "name": "@projectx/specialist-agents",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Concrete specialist agent implementations",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "pnpm exec jest --config ../../jest.config.js --testMatch='**/packages/specialist-agents/**/*.spec.ts' --runInBand --passWithNoTests",
+    "lint": "eslint \"src/**/*.ts\" --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@projectx/ai-runtime": "workspace:*",
+    "@projectx/domain": "workspace:*",
+    "@projectx/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

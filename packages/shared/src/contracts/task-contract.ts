@@ -9,6 +9,7 @@ export interface TaskContract {
   agentId: string;
   agentVersion: string;
   taskType: string;
+  requiredCapability?: string;
   status: TaskStatus;
   input: unknown;
   output?: unknown;

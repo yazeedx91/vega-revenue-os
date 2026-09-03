@@ -65,7 +65,16 @@ describe('MissionOrchestratorService', () => {
 
     const updated = await missionRepository.findById(ctx, mission.id as string);
     expect(updated?.status).toBe('PAUSED');
-    expect(workflowClient.signaled.some((s) => s.signalName === 'pause')).toBe(true);
+    expect(workflowClient.signaled.some((s) => s.signalName === 'control' && (s.payload as { action: string }).action === 'PAUSE')).toBe(true);
+  });
+
+  it('is idempotent when pausing an already paused mission', async () => {
+    const mission = createTestMission({ status: 'PAUSED' });
+    const ctx = createTenantContext('tenant-1', 'corr-1');
+    await missionRepository.save(ctx, mission);
+    await service.pauseMission(ctx, { missionId: mission.id as string, reason: 'Manual pause' });
+
+    expect(workflowClient.signaled.filter((s) => s.signalName === 'control').length).toBe(0);
   });
 
   it('resumes a paused mission', async () => {
@@ -76,7 +85,16 @@ describe('MissionOrchestratorService', () => {
 
     const updated = await missionRepository.findById(ctx, mission.id as string);
     expect(updated?.status).toBe('EXECUTING');
-    expect(workflowClient.signaled.some((s) => s.signalName === 'resume')).toBe(true);
+    expect(workflowClient.signaled.some((s) => s.signalName === 'control' && (s.payload as { action: string }).action === 'RESUME')).toBe(true);
+  });
+
+  it('is idempotent when resuming an already executing mission', async () => {
+    const mission = createTestMission({ status: 'EXECUTING' });
+    const ctx = createTenantContext('tenant-1', 'corr-1');
+    await missionRepository.save(ctx, mission);
+    await service.resumeMission(ctx, { missionId: mission.id as string });
+
+    expect(workflowClient.signaled.filter((s) => s.signalName === 'control').length).toBe(0);
   });
 
   it('cancels a mission', async () => {
@@ -87,7 +105,17 @@ describe('MissionOrchestratorService', () => {
 
     const updated = await missionRepository.findById(ctx, mission.id as string);
     expect(updated?.status).toBe('CANCELLED');
-    expect(workflowClient.cancelled).toHaveLength(1);
+    expect(workflowClient.signaled.some((s) => s.signalName === 'control' && (s.payload as { action: string }).action === 'CANCEL')).toBe(true);
+    expect(workflowClient.cancelled).toHaveLength(0);
+  });
+
+  it('is idempotent when cancelling an already cancelled mission', async () => {
+    const mission = createTestMission({ status: 'CANCELLED' });
+    const ctx = createTenantContext('tenant-1', 'corr-1');
+    await missionRepository.save(ctx, mission);
+    await service.cancelMission(ctx, { missionId: mission.id as string, reason: 'Aborted' });
+
+    expect(workflowClient.signaled.filter((s) => s.signalName === 'control').length).toBe(0);
   });
 
   it('rejects cross-tenant commands', async () => {
@@ -97,5 +125,14 @@ describe('MissionOrchestratorService', () => {
 
     const ctx = createTenantContext('tenant-2', 'corr-1');
     await expect(service.cancelMission(ctx, { missionId: mission.id as string, reason: 'x' })).rejects.toThrow();
+  });
+
+  it('signals a replan command', async () => {
+    const mission = createTestMission({ status: 'EXECUTING' });
+    const ctx = createTenantContext('tenant-1', 'corr-1');
+    await missionRepository.save(ctx, mission);
+    await service.replanMission(ctx, { missionId: mission.id as string });
+
+    expect(workflowClient.signaled.some((s) => s.signalName === 'control' && (s.payload as { action: string }).action === 'REPLAN')).toBe(true);
   });
 });

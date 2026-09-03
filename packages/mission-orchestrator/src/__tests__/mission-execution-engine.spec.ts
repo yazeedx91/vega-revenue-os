@@ -114,4 +114,98 @@ describe('MissionExecutionEngine', () => {
     const ctx = createTenantContext('tenant-2', 'corr-1');
     await expect(engine.executeMission(ctx, mission.id as string)).rejects.toThrow();
   });
+
+  it('replans an executing mission with a higher plan version', async () => {
+    const ctx = createTenantContext('tenant-1', 'corr-1');
+    const mission = createTestMission({ status: 'PLANNING' });
+    await missionRepository.save(ctx, mission);
+
+    await engine.planMission(ctx, mission.id as string);
+    await engine.replanMission(ctx, mission.id as string);
+
+    const updated = await missionRepository.findById(ctx, mission.id as string);
+    expect(updated?.plan.version).toBe(3);
+    expect(updated?.tasks).toHaveLength(2);
+    expect(eventBus.published.some((e) => e.eventType === 'MissionReplanned')).toBe(true);
+  });
+
+  it('rejects replan with a lower or equal plan version', async () => {
+    const ctx = createTenantContext('tenant-1', 'corr-1');
+    const mission = createTestMission({ status: 'PLANNING' });
+    await missionRepository.save(ctx, mission);
+
+    await engine.planMission(ctx, mission.id as string);
+
+    const invalidPlan: import('@projectx/shared').PlanContract = {
+      planId: `${mission.id as string}-plan-0`,
+      missionId: mission.id as string,
+      version: 0,
+      objectives: [],
+      phases: [
+        {
+          phaseId: `${mission.id as string}-phase-0`,
+          name: 'Bad',
+          tasks: [
+            {
+              taskId: `${mission.id as string}-task-0`,
+              missionId: mission.id as string,
+              planId: `${mission.id as string}-plan-0`,
+              agentId: 'agent-1',
+              agentVersion: '1.0.0',
+              taskType: 'research',
+              requiredCapability: 'research',
+              status: 'PENDING',
+              input: {},
+              dependsOn: [],
+              approvalGateId: null,
+            },
+          ],
+        },
+      ],
+      approvalGates: [],
+      fallbackBranches: [],
+    };
+
+    await expect(engine.replanMission(ctx, mission.id as string, invalidPlan)).rejects.toThrow(/version/);
+  });
+
+  it('rejects a plan whose required capability is not supported by the selected agent', async () => {
+    const ctx = createTenantContext('tenant-1', 'corr-1');
+    const mission = createTestMission({ status: 'PLANNING' });
+    await missionRepository.save(ctx, mission);
+
+    await engine.planMission(ctx, mission.id as string);
+
+    const badPlan: import('@projectx/shared').PlanContract = {
+      planId: `${mission.id as string}-plan-bad`,
+      missionId: mission.id as string,
+      version: 3,
+      objectives: [],
+      phases: [
+        {
+          phaseId: `${mission.id as string}-phase-bad`,
+          name: 'Bad',
+          tasks: [
+            {
+              taskId: `${mission.id as string}-task-bad`,
+              missionId: mission.id as string,
+              planId: `${mission.id as string}-plan-bad`,
+              agentId: 'agent-1',
+              agentVersion: '1.0.0',
+              taskType: 'research',
+              requiredCapability: 'unsupported-capability',
+              status: 'PENDING',
+              input: {},
+              dependsOn: [],
+              approvalGateId: null,
+            },
+          ],
+        },
+      ],
+      approvalGates: [],
+      fallbackBranches: [],
+    };
+
+    await expect(engine.replanMission(ctx, mission.id as string, badPlan)).rejects.toThrow(/capability/);
+  });
 });

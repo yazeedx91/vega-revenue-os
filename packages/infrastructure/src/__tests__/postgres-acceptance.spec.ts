@@ -191,7 +191,7 @@ describe('PostgreSQL integration acceptance', () => {
     ).rejects.toThrow();
   });
 
-  it.skip('optimistic concurrency detects stale updates', async () => {
+  it('optimistic concurrency detects stale updates', async () => {
     if (!pool) return;
     const id = `occ-${Date.now()}`;
     const initialPayload = JSON.stringify({ id, tenantId: 'tenant-occ', status: 'draft' });
@@ -203,11 +203,13 @@ describe('PostgreSQL integration acceptance', () => {
     });
 
     const tx1 = client.transaction(ctx('tenant-occ'), async (db) => {
-      await db.query(`UPDATE outreach.campaigns SET payload = payload || $1, version = 1 WHERE tenant_id = $2 AND id = $3 AND version = 0`, [
-        JSON.stringify({ status: 'active' }),
-        'tenant-occ',
-        id,
-      ]);
+      const result = await db.query(
+        `UPDATE outreach.campaigns SET payload = payload || $1, version = 1 WHERE tenant_id = $2 AND id = $3 AND version = 0`,
+        [JSON.stringify({ status: 'active' }), 'tenant-occ', id],
+      );
+      if (result.rowCount === 0) {
+        throw new ConcurrencyConflictError('Concurrent update conflict', 'tenant-occ', id, 0);
+      }
     });
 
     const tx2 = client.transaction(ctx('tenant-occ'), async (db) => {

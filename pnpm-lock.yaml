@@ -388,6 +388,9 @@ importers:
       '@projectx/shared':
         specifier: workspace:*
         version: link:../shared
+      '@projectx/specialist-agents':
+        specifier: workspace:*
+        version: link:../specialist-agents
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -664,6 +667,28 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  packages/specialist-agents:
+    dependencies:
+      '@projectx/ai-runtime':
+        specifier: workspace:*
+        version: link:../ai-runtime
+      '@projectx/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@projectx/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      tsx:
+        specifier: ^4.16.0
+        version: 4.23.12
       typescript:
         specifier: ^5.5.0
         version: 5.9.3

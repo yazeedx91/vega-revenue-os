@@ -20,6 +20,7 @@
  *
  * Skips (like temporal-acceptance.spec.ts) when Temporal is unreachable.
  */
+import { createConnection } from 'net';
 import { Client, Connection } from '@temporalio/client';
 import { NativeConnection, Worker } from '@temporalio/worker';
 import { randomUUID } from 'crypto';
@@ -72,13 +73,21 @@ import {
 const DEFAULT_TEMPORAL_ADDRESS = 'localhost:7234';
 
 async function isReachable(address: string): Promise<boolean> {
-  try {
-    const connection = await NativeConnection.connect({ address });
-    await connection.close();
-    return true;
-  } catch {
-    return false;
-  }
+  const [host, portStr] = address.split(':');
+  const port = parseInt(portStr ?? '7233', 10);
+  return new Promise((resolve) => {
+    const socket = createConnection({ host, port });
+    let resolved = false;
+    const finish = (value: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      socket.destroy();
+      resolve(value);
+    };
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+    socket.setTimeout(5000, () => finish(false));
+  });
 }
 
 const tenantId = asTenantId(`tenant-approval-lifecycle-${Date.now()}`);
@@ -262,6 +271,8 @@ describe('Phase 14.8 approval-wait lifecycle (Temporal integration)', () => {
     if (workerRun) {
       await workerRun;
     }
+    await workflowClient?.close?.();
+    await describeClient?.connection?.close?.();
     await nativeConnection?.close();
   });
 

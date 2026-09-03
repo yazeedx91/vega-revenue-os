@@ -1,6 +1,7 @@
 import type { TenantContext } from '@projectx/domain';
 import { Mission, type DomainEvent } from '@projectx/domain';
 import { Actor } from '@projectx/domain';
+import { toResolvedAgent } from '@projectx/ai-runtime';
 import type { IAgentExecutor, IAgentRegistry, IPlanner } from '@projectx/ai-runtime';
 import type { PlanningRequest } from '@projectx/ai-runtime';
 import type {
@@ -65,7 +66,10 @@ export function createTestMission(props?: { missionId?: string; tenantId?: strin
       props.status === 'APPROVED' ||
       props.status === 'PLANNING' ||
       props.status === 'EXECUTING' ||
-      props.status === 'PAUSED'
+      props.status === 'PAUSED' ||
+      props.status === 'CANCELLED' ||
+      props.status === 'FAILED' ||
+      props.status === 'ARCHIVED'
     ) {
       mission.approve(actor, asCorrelationId('corr-approve'), asEventId('evt-approve'));
       mission.clearDomainEvents();
@@ -73,17 +77,38 @@ export function createTestMission(props?: { missionId?: string; tenantId?: strin
     if (
       props.status === 'PLANNING' ||
       props.status === 'EXECUTING' ||
-      props.status === 'PAUSED'
+      props.status === 'PAUSED' ||
+      props.status === 'CANCELLED' ||
+      props.status === 'FAILED' ||
+      props.status === 'ARCHIVED'
     ) {
       mission.start(asCorrelationId('corr-start'), asEventId('evt-start'));
       mission.clearDomainEvents();
     }
-    if (props.status === 'EXECUTING' || props.status === 'PAUSED') {
+    if (
+      props.status === 'EXECUTING' ||
+      props.status === 'PAUSED' ||
+      props.status === 'CANCELLED' ||
+      props.status === 'FAILED' ||
+      props.status === 'ARCHIVED'
+    ) {
       mission.planValid(asCorrelationId('corr-plan'), asEventId('evt-plan'));
       mission.clearDomainEvents();
     }
     if (props.status === 'PAUSED') {
       mission.pause('test pause', asCorrelationId('corr-pause'), asEventId('evt-pause'));
+      mission.clearDomainEvents();
+    }
+    if (props.status === 'CANCELLED' || props.status === 'ARCHIVED') {
+      mission.cancel('test cancel', asCorrelationId('corr-cancel'), asEventId('evt-cancel'));
+      mission.clearDomainEvents();
+    }
+    if (props.status === 'FAILED') {
+      mission.fail('test failure', asCorrelationId('corr-fail'), asEventId('evt-fail'));
+      mission.clearDomainEvents();
+    }
+    if (props.status === 'ARCHIVED') {
+      mission.archive(asCorrelationId('corr-archive'), asEventId('evt-archive'));
       mission.clearDomainEvents();
     }
   }
@@ -159,9 +184,9 @@ export class FakeAgentExecutor implements IAgentExecutor {
 }
 
 export class FakeAgentRegistry implements IAgentRegistry {
-  async getAgent(_ctx: TenantContext, agentId: string, _version?: string): Promise<AgentContract | null> {
+  async getAgent(_ctx: TenantContext, agentId: string, _version?: string) {
     if (agentId !== 'agent-1') return null;
-    return {
+    return toResolvedAgent({
       agentId: 'agent-1',
       name: 'Fake Agent',
       role: 'researcher',
@@ -179,7 +204,7 @@ export class FakeAgentRegistry implements IAgentRegistry {
       version: '1.0.0',
       createdAt: new Date(),
       updatedAt: new Date(),
-    };
+    }, 'stub.agent.v1');
   }
 
   async getCapability(): Promise<{ capabilityId: string; allowedTools: string[] } | null> {
@@ -190,12 +215,15 @@ export class FakeAgentRegistry implements IAgentRegistry {
 export class FakePlanner implements IPlanner {
   async plan(_ctx: TenantContext, request: PlanningRequest): Promise<PlanContract> {
     const mission = request.mission;
+    const previousVersion = mission.plan?.version ?? 0;
+    const version = previousVersion > 0 ? previousVersion + 1 : 1;
+    const planId = `${mission.missionId}-plan-${version}`;
     const task1Id = `${mission.missionId}-task-1`;
     const task2Id = `${mission.missionId}-task-2`;
     return {
-      planId: `${mission.missionId}-plan`,
+      planId,
       missionId: mission.missionId,
-      version: 1,
+      version,
       objectives: [mission.objective],
       phases: [
         {
@@ -205,10 +233,11 @@ export class FakePlanner implements IPlanner {
             {
               taskId: task1Id,
               missionId: mission.missionId,
-              planId: `${mission.missionId}-plan`,
+              planId,
               agentId: 'agent-1',
               agentVersion: '1.0.0',
               taskType: 'research',
+              requiredCapability: 'research',
               status: 'PENDING',
               input: {},
               dependsOn: [],
@@ -217,10 +246,11 @@ export class FakePlanner implements IPlanner {
             {
               taskId: task2Id,
               missionId: mission.missionId,
-              planId: `${mission.missionId}-plan`,
+              planId,
               agentId: 'agent-1',
               agentVersion: '1.0.0',
               taskType: 'research',
+              requiredCapability: 'research',
               status: 'PENDING',
               input: {},
               dependsOn: [task1Id],
@@ -254,3 +284,5 @@ export function createCorrelationIdGenerator(): () => CorrelationId {
 export function createIdempotencyKeyGenerator(): (hint: string) => IdempotencyKey {
   return (hint: string) => asIdempotencyKey(hint);
 }
+
+

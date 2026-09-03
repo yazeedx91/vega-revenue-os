@@ -20,6 +20,10 @@ export async function planMissionActivity(ctx: TenantContext, missionId: string)
   return getEngine().planMission(ctx, missionId);
 }
 
+export async function replanMissionActivity(ctx: TenantContext, missionId: string): Promise<void> {
+  return getEngine().replanMission(ctx, missionId);
+}
+
 export async function executeMissionStepActivity(ctx: TenantContext, missionId: string) {
   return getEngine().executeMissionStep(ctx, missionId);
 }

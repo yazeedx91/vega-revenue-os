@@ -35,6 +35,7 @@ function mapAgentVersion(row: Record<string, unknown>): AgentVersion {
     isSystem: (row.is_system as boolean | null) ?? false,
     version: row.version as string,
     lifecycle: row.lifecycle as AgentVersion['lifecycle'],
+    implementationKey: (row.implementation_key as string) ?? '',
     definition: {
       agentId: row.agent_id as string,
       name: row.name as string,
@@ -115,10 +116,11 @@ export class PostgresAgentRepository implements IAgentRepository {
         INSERT INTO control_plane.agent_versions
           (version_id, agent_id, tenant_id, is_system, version, lifecycle, name, role, description,
            capabilities, tools, policies, model_policy, memory_policy, knowledge_policy,
-           autonomy_level_default, evaluation_policy, owner, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), NOW())
+           autonomy_level_default, evaluation_policy, owner, implementation_key, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
         ON CONFLICT (version_id) DO UPDATE SET
           lifecycle = EXCLUDED.lifecycle,
+          implementation_key = EXCLUDED.implementation_key,
           updated_at = NOW()
       `;
       const d = version.definition;
@@ -141,6 +143,7 @@ export class PostgresAgentRepository implements IAgentRepository {
         d.autonomyLevelDefault,
         d.evaluationPolicy,
         d.owner,
+        version.implementationKey,
       ]);
     });
   }
@@ -479,3 +482,6 @@ export class PostgresAuditSink implements IAuditSink {
     });
   }
 }
+
+
+

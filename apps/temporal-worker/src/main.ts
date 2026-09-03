@@ -104,7 +104,7 @@ async function runMissionWorker(connection: NativeConnection): Promise<void> {
 
 async function runOutreachWorker(connection: NativeConnection): Promise<void> {
   const telemetry = createTelemetry();
-  const adapters = createDurableAdapters();
+  const adapters = await createDurableAdapters();
   const { executionService, executionRepo, suppressionRepository, sequenceRepo } = await createOutreachExecutionService(
     adapters,
     telemetry,
@@ -146,7 +146,7 @@ function createHealthServer(healthProbe: HealthProbe): Server {
 
 async function main(): Promise<void> {
   const healthProbe = new HealthProbe();
-  const adapters = createDurableAdapters();
+  const adapters = await createDurableAdapters();
   healthProbe.add(new SecretReadinessIndicator({ name: 'secrets' }));
   if (adapters.pool) {
     healthProbe.add(new PostgresHealthIndicator({ pool: adapters.pool, name: 'postgres' }));

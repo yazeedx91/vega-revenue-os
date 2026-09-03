@@ -1,0 +1,14 @@
+export { BaseSpecialist } from './base-specialist';
+export { SpecialistImplementationRegistry } from './specialist-implementation-registry';
+export { SYSTEM_SPECIALIST_DEFINITIONS, type SpecialistDefinition } from './specialist-definitions';
+export { ResearchSpecialist } from './research/research-specialist';
+export { IcpQualificationSpecialist } from './icp-qualification/icp-qualification-specialist';
+export { LeadQualificationSpecialist } from './lead-qualification/lead-qualification-specialist';
+export { BuyingSignalSpecialist } from './buying-signal/buying-signal-specialist';
+export { OutreachStrategistSpecialist } from './outreach-strategist/outreach-strategist-specialist';
+export { OutreachWriterSpecialist } from './outreach-writer/outreach-writer-specialist';
+export { ConversationSpecialist } from './conversation/conversation-specialist';
+export { MeetingSpecialist } from './meeting/meeting-specialist';
+export { CrmSpecialist } from './crm/crm-specialist';
+export { FollowUpNurtureSpecialist } from './follow-up-nurture/follow-up-nurture-specialist';
+export { ComplianceSafetySpecialist } from './compliance-safety/compliance-safety-specialist';

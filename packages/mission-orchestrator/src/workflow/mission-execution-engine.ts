@@ -1,5 +1,6 @@
-import { Actor, ensureSameTenant, type Mission, type MissionTask, type MissionId, type TaskId, type TenantContext } from '@projectx/domain';
+import { Actor, ensureSameTenant, type Mission, type MissionTask, type MissionPlan, type MissionTaskProps, type MissionId, type TaskId, type TenantContext } from '@projectx/domain';
 import type {
+  AgentContract,
   AIExecutionRequest,
   AIExecutionResult,
   CorrelationId,
@@ -70,34 +71,13 @@ export class MissionExecutionEngine {
       throw new Error(`Mission ${missionId} is not in PLANNING state`);
     }
 
-    const contract = mapMissionToContract(mission);
+    const { plan } = await this.buildPlan(ctx, mission);
     const correlationId = this.deps.generateCorrelationId();
-    const availableAgents = await this.loadAvailableAgents(ctx);
-
-    const plan = await this.deps.missionPlanner.plan(ctx, {
-      mission: contract,
-      availableAgents,
-      correlationId,
-      idempotencyKey: this.deps.generateIdempotencyKey(`plan:${missionId}`),
-    });
 
     for (const taskContract of this.flattenTasks(plan)) {
+      await this.validateCapability(ctx, taskContract);
       const taskResult = mission.addTask(
-        {
-          id: taskContract.taskId as unknown as TaskId,
-          missionId: taskContract.missionId as unknown as MissionId,
-          planId: taskContract.planId,
-          agentId: taskContract.agentId,
-          agentVersion: taskContract.agentVersion,
-          taskType: taskContract.taskType,
-          input: taskContract.input,
-          dependsOn: taskContract.dependsOn as unknown as TaskId[],
-          deadline: taskContract.deadline,
-          approvalGateId: taskContract.approvalGateId ?? undefined,
-          idempotencyKey: this.deps.generateIdempotencyKey(`task:${taskContract.taskId}`),
-          correlationId,
-          actor: Actor.system('mission-planner', ctx.tenantId),
-        },
+        this.mapTaskContractToProps(mission, taskContract, plan.planId, correlationId),
         correlationId,
         this.deps.generateEventId(),
       );
@@ -106,12 +86,42 @@ export class MissionExecutionEngine {
       }
     }
 
+    mission.plan = plan as unknown as MissionPlan;
+
     const planValidResult = mission.planValid(
       this.deps.generateCorrelationId(),
       this.deps.generateEventId(),
     );
     if (!planValidResult.success) {
       throw new Error(`Cannot mark plan valid: ${planValidResult.error.message}`);
+    }
+
+    await this.saveAndPublish(ctx, mission);
+  }
+
+  async replanMission(ctx: TenantContext, missionId: string, newPlan?: PlanContract): Promise<void> {
+    const mission = await this.loadMission(ctx, missionId);
+    if (this.isTerminal(mission.status)) {
+      throw new Error(`Cannot replan terminal mission ${missionId}`);
+    }
+
+    const plan = newPlan ? newPlan : (await this.buildPlan(ctx, mission)).plan;
+    const correlationId = this.deps.generateCorrelationId();
+
+    const taskProps: MissionTaskProps[] = [];
+    for (const taskContract of this.flattenTasks(plan)) {
+      await this.validateCapability(ctx, taskContract);
+      taskProps.push(this.mapTaskContractToProps(mission, taskContract, plan.planId, correlationId));
+    }
+
+    const replanResult = mission.replan(
+      plan as unknown as MissionPlan,
+      taskProps,
+      this.deps.generateCorrelationId(),
+      this.deps.generateEventId(),
+    );
+    if (!replanResult.success) {
+      throw new Error(`Cannot replan mission ${missionId}: ${replanResult.error.message}`);
     }
 
     await this.saveAndPublish(ctx, mission);
@@ -296,14 +306,70 @@ export class MissionExecutionEngine {
     );
   }
 
-  private async loadAvailableAgents(ctx: TenantContext) {
+  private async loadAvailableAgents(ctx: TenantContext): Promise<AgentContract[]> {
     const agentIds = ['agent-1', 'outreach-orchestrator'];
-    const agents: Awaited<ReturnType<IAgentRegistry['getAgent']>>[] = [];
+    const agents: AgentContract[] = [];
     for (const agentId of agentIds) {
-      const agent = await this.deps.agentRegistry.getAgent(ctx, agentId);
-      if (agent) agents.push(agent);
+      const resolved = await this.deps.agentRegistry.getAgent(ctx, agentId);
+      if (resolved) agents.push(resolved.contract);
     }
-    return agents.filter((a): a is NonNullable<typeof a> => a !== null);
+    return agents;
+  }
+
+  private async buildPlan(
+    ctx: TenantContext,
+    mission: Mission,
+  ): Promise<{ plan: PlanContract; availableAgents: AgentContract[] }> {
+    const contract = mapMissionToContract(mission);
+    const correlationId = this.deps.generateCorrelationId();
+    const availableAgents = await this.loadAvailableAgents(ctx);
+    const plan = await this.deps.missionPlanner.plan(ctx, {
+      mission: contract,
+      availableAgents,
+      correlationId,
+      idempotencyKey: this.deps.generateIdempotencyKey(`plan:${mission.id}`),
+    });
+    return { plan, availableAgents };
+  }
+
+  private async validateCapability(ctx: TenantContext, taskContract: TaskContract): Promise<void> {
+    const agent = await this.deps.agentRegistry.getAgent(
+      ctx,
+      taskContract.agentId,
+      taskContract.agentVersion,
+    );
+    if (!agent) {
+      throw new Error(`Missing required agent/capability for task ${taskContract.taskId}`);
+    }
+    if (taskContract.requiredCapability && !agent.contract.capabilities.includes(taskContract.requiredCapability)) {
+      throw new Error(
+        `Agent ${agent.agentId} does not support required capability ${taskContract.requiredCapability}`,
+      );
+    }
+  }
+
+  private mapTaskContractToProps(
+    mission: Mission,
+    taskContract: TaskContract,
+    planId: string,
+    correlationId: CorrelationId,
+  ): MissionTaskProps {
+    return {
+      id: taskContract.taskId as unknown as TaskId,
+      missionId: mission.id,
+      planId: taskContract.planId ?? planId,
+      agentId: taskContract.agentId,
+      agentVersion: taskContract.agentVersion,
+      taskType: taskContract.taskType,
+      requiredCapability: taskContract.requiredCapability,
+      input: taskContract.input,
+      dependsOn: taskContract.dependsOn as unknown as TaskId[],
+      deadline: taskContract.deadline,
+      approvalGateId: taskContract.approvalGateId ?? undefined,
+      idempotencyKey: this.deps.generateIdempotencyKey(`task:${taskContract.taskId}:${planId}`),
+      correlationId,
+      actor: Actor.system('mission-planner', mission.tenantId),
+    };
   }
 
   private buildExecutionRequest(
@@ -337,7 +403,7 @@ export class MissionExecutionEngine {
         mission: mapMissionToContract(mission) as unknown as Record<string, unknown>,
         target: task.input as Record<string, unknown>,
       },
-      capabilities: ['research'],
+      capabilities: task.requiredCapability ? [task.requiredCapability] : ['research'],
       policyContext,
       budget,
       deadline: task.deadline ?? mission.deadline,
@@ -371,3 +437,5 @@ export class MissionExecutionEngine {
     return ['COMPLETED', 'FAILED', 'CANCELLED', 'ARCHIVED'].includes(status);
   }
 }
+
+

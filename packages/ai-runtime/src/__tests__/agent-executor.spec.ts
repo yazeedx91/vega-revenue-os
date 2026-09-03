@@ -20,6 +20,7 @@ import {
   FakePolicyClient,
   FakeToolGateway,
   NoOpTelemetry,
+  FakeImplementationRegistry,
 } from '@projectx/ai-runtime';
 import type { OutputValidatorPolicy } from '@projectx/ai-runtime';
 import { baseExecution, activeAgent, tenantId, otherTenantId } from './fixtures';
@@ -145,7 +146,7 @@ function makeExecutor(options: {
 
   const validatorPolicy: OutputValidatorPolicy = options.validatorPolicy ?? {
     requiredFields: [],
-    forbiddenValues: [],
+    forbiddenValues: ['badword'],
     allowedActions: ['search'],
     piiPatterns: [],
   };
@@ -165,6 +166,7 @@ function makeExecutor(options: {
     outputValidator,
     telemetry: new NoOpTelemetry(),
     checkpointStore,
+    implementationRegistry: new FakeImplementationRegistry(),
   });
 
   return { executor, checkpointStore };
@@ -345,3 +347,7 @@ describe('AgentExecutor', () => {
     expect(result.outcome.decisions).toEqual([{ policyDecisionId: 'pd-1', outcome: 'DENY' }]);
   });
 });
+
+
+
+

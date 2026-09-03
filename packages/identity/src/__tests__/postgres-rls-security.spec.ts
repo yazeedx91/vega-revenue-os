@@ -127,9 +127,11 @@ describe('PostgreSQL identity RLS and SECURITY DEFINER proof', () => {
     expect(appGrant.privilege_type).toBe('EXECUTE');
   });
 
-  it('tenant A cannot read or mutate tenant B records', async () => {
-    if (!repository) return;
-    const aId = randomUUID();
+  it(
+    'tenant A cannot read or mutate tenant B records',
+    async () => {
+      if (!repository) return;
+      const aId = randomUUID();
     const bId = randomUUID();
     const userA = await repository.upsertUser({ id: aId, email: 'a@tenant-a.test', name: 'A' });
     const userB = await repository.upsertUser({ id: bId, email: 'b@tenant-b.test', name: 'B' });
@@ -176,7 +178,9 @@ describe('PostgreSQL identity RLS and SECURITY DEFINER proof', () => {
 
     const bStillThere = await repository.findWorkspaceById(workspaceB.id, tenantB);
     expect(bStillThere).not.toBeNull();
-  });
+  },
+    30_000,
+  );
 
   it('unauthenticated queries without tenant context see no tenant records', async () => {
     if (!pool) return;

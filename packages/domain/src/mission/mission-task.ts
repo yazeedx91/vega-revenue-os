@@ -13,6 +13,7 @@ export interface MissionTaskProps {
   readonly agentId: string;
   readonly agentVersion: string;
   readonly taskType: string;
+  readonly requiredCapability?: string;
   readonly input: unknown;
   readonly dependsOn: TaskId[];
   readonly deadline?: Date;
@@ -28,6 +29,7 @@ export class MissionTask extends Entity<TaskId> {
   public readonly agentId: string;
   public readonly agentVersion: string;
   public readonly taskType: string;
+  public readonly requiredCapability?: string;
   public readonly input: unknown;
   public readonly dependsOn: TaskId[];
   public readonly deadline?: Date;
@@ -47,6 +49,7 @@ export class MissionTask extends Entity<TaskId> {
     this.agentId = props.agentId;
     this.agentVersion = props.agentVersion;
     this.taskType = props.taskType;
+    this.requiredCapability = props.requiredCapability;
     this.input = props.input;
     this.dependsOn = props.dependsOn;
     this.deadline = props.deadline;

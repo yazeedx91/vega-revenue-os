@@ -1,3 +1,4 @@
+import { createConnection } from 'net';
 import { WorkflowClient } from '@temporalio/client';
 import { NativeConnection, Worker } from '@temporalio/worker';
 import * as activities from './test-activities';
@@ -5,13 +6,21 @@ import * as activities from './test-activities';
 const DEFAULT_TEMPORAL_ADDRESS = 'localhost:7234';
 
 async function isReachable(address: string): Promise<boolean> {
-  try {
-    const connection = await NativeConnection.connect({ address });
-    await connection.close();
-    return true;
-  } catch {
-    return false;
-  }
+  const [host, portStr] = address.split(':');
+  const port = parseInt(portStr ?? '7233', 10);
+  return new Promise((resolve) => {
+    const socket = createConnection({ host, port });
+    let resolved = false;
+    const finish = (value: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      socket.destroy();
+      resolve(value);
+    };
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+    socket.setTimeout(5000, () => finish(false));
+  });
 }
 
 describe('Temporal integration acceptance', () => {

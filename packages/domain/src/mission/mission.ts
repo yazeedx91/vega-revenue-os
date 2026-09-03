@@ -72,11 +72,11 @@ export class Mission extends AggregateRoot<MissionId> {
   public readonly successCriteria: MissionSuccessCriteria;
   public readonly deadline?: Date;
   public readonly ownerUserId: UserId;
-  public readonly plan: MissionPlan;
+  public plan: MissionPlan;
   public readonly createdAt: Date;
   public updatedAt: Date;
   private _status: MissionStatus = 'DRAFT';
-  private readonly _tasks: MissionTask[] = [];
+  private _tasks: MissionTask[] = [];
   private readonly _approvals: unknown[] = [];
   private _outcomes: MissionOutcomes = {};
 
@@ -177,12 +177,74 @@ export class Mission extends AggregateRoot<MissionId> {
     );
   }
 
-  planValid(correlationId: CorrelationId, eventId: EventId): Result<void, InvalidStateTransitionError> {
+  planValid(
+    correlationId: CorrelationId,
+    eventId: EventId,
+  ): Result<void, InvalidStateTransitionError | MissionInvariantError> {
+    const validation = this.validateTaskGraph(this._tasks, this.plan.version);
+    if (validation) {
+      return fail(validation);
+    }
     return this.transitionTo('EXECUTING', correlationId, () =>
       new MissionEvents.MissionStarted(eventId, this.tenantId, correlationId, {
         missionId: this.id,
       }),
     );
+  }
+
+  replan(
+    newPlan: MissionPlan,
+    newTasks: MissionTaskProps[],
+    correlationId: CorrelationId,
+    eventId: EventId,
+  ): Result<void, MissionInvariantError | InvalidStateTransitionError> {
+    if (this.isTerminal()) {
+      return fail(new MissionInvariantError('Cannot replan a terminal mission'));
+    }
+    if (newPlan.version <= 0) {
+      return fail(new MissionInvariantError('Plan version must be positive'));
+    }
+    if (newPlan.version <= this.plan.version) {
+      return fail(
+        new MissionInvariantError(
+          `Plan version ${newPlan.version} is not greater than current version ${this.plan.version}`,
+        ),
+      );
+    }
+
+    const existingCompleted = new Map<string, MissionTask>(
+      this._tasks
+        .filter((t) => t.status === 'COMPLETED')
+        .map((t) => [t.id as string, t]),
+    );
+
+    const tasks: MissionTask[] = newTasks.map((props) => {
+      const existing = existingCompleted.get(props.id as string);
+      const task = new MissionTask(props);
+      if (existing && existing.status === 'COMPLETED') {
+        task.status = existing.status;
+        task.output = existing.output;
+        task.startedAt = existing.startedAt;
+        task.completedAt = existing.completedAt;
+      }
+      return task;
+    });
+
+    const validation = this.validateTaskGraph(tasks, newPlan.version);
+    if (validation) {
+      return fail(validation);
+    }
+
+    this.plan = newPlan;
+    this._tasks = tasks;
+    this.updatedAt = new Date();
+    this.applyEvent(
+      new MissionEvents.MissionReplanned(eventId, this.tenantId, correlationId, {
+        missionId: this.id,
+        planVersion: newPlan.version,
+      }),
+    );
+    return ok(undefined);
   }
 
   pause(
@@ -283,8 +345,14 @@ export class Mission extends AggregateRoot<MissionId> {
     if (this.isTerminal()) {
       return fail(new MissionInvariantError('Cannot add tasks to a terminal mission'));
     }
+    if (this._tasks.some((t) => t.id === props.id)) {
+      return fail(new MissionInvariantError('Duplicate task ID in plan'));
+    }
     if (this._tasks.some((t) => t.idempotencyKey === props.idempotencyKey)) {
       return fail(new MissionInvariantError('Duplicate task idempotency key'));
+    }
+    if (props.requiredCapability !== undefined && props.requiredCapability.trim() === '') {
+      return fail(new MissionInvariantError('Task missing required capability'));
     }
 
     const task = new MissionTask(props);
@@ -469,6 +537,70 @@ export class Mission extends AggregateRoot<MissionId> {
 
   private findTask(taskId: TaskId): MissionTask | undefined {
     return this._tasks.find((t) => t.id === taskId);
+  }
+
+  private validateTaskGraph(
+    tasks: MissionTask[],
+    planVersion: number,
+  ): MissionInvariantError | undefined {
+    if (planVersion <= 0) {
+      return new MissionInvariantError('Plan version must be positive');
+    }
+
+    const taskIds = new Set<string>();
+    const ids = tasks.map((t) => t.id as string);
+    for (const id of ids) {
+      if (taskIds.has(id)) {
+        return new MissionInvariantError('Duplicate task IDs in plan');
+      }
+      taskIds.add(id);
+    }
+
+    for (const task of tasks) {
+      if (!task.agentId || task.agentId.trim().length === 0) {
+        return new MissionInvariantError(`Task ${task.id} missing required agent/capability`);
+      }
+      if (task.requiredCapability !== undefined && task.requiredCapability.trim().length === 0) {
+        return new MissionInvariantError(`Task ${task.id} missing required capability`);
+      }
+      for (const dep of task.dependsOn) {
+        const depId = dep as string;
+        if (!taskIds.has(depId)) {
+          return new MissionInvariantError(`Missing dependency ${depId} in plan`);
+        }
+      }
+    }
+
+    const taskById = new Map<string, MissionTask>(tasks.map((t) => [t.id as string, t]));
+    const visited = new Set<string>();
+    const stack = new Set<string>();
+
+    const visit = (id: string): MissionInvariantError | undefined => {
+      if (stack.has(id)) {
+        return new MissionInvariantError('Cyclic dependency detected in plan');
+      }
+      if (visited.has(id)) {
+        return undefined;
+      }
+      stack.add(id);
+      const task = taskById.get(id);
+      if (task) {
+        for (const dep of task.dependsOn) {
+          const err = visit(dep as string);
+          if (err) return err;
+        }
+      }
+      stack.delete(id);
+      visited.add(id);
+      return undefined;
+    };
+
+    for (const id of taskIds) {
+      const err = visit(id);
+      if (err) return err;
+    }
+
+    return undefined;
   }
 
   private transitionTo(
