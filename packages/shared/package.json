@@ -6,7 +6,7 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "pnpm exec jest --config ../../jest.config.js --testPathPattern=\"packages/shared\" --passWithNoTests",
+    "test": "pnpm exec jest --config ../../jest.config.js --testPathPattern=\"packages/shared\" --runInBand --passWithNoTests",
     "lint": "eslint \"src/**/*.ts\" --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit"

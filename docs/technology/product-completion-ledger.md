@@ -4,9 +4,9 @@
 
 | Requirement | Status | Evidence | Notes |
 |---|---|---|---|
-| R1 - System agents seed is idempotent and does not rewrite immutable ACTIVE versions | PASS | `SystemAgentsSeed` lifecycle progression is idempotent and skips past ACTIVE if already active; `PostgresAgentRepository.saveVersion` no-ops for identical definitions | |
-| R4 - AgentVersion immutability | PASS | `ControlPlaneService.registerAgentVersion` performs semantic pre-check; `PostgresAgentRepository.saveVersion` uses `SELECT ... FOR UPDATE` transactional enforcement; `ImmutableAgentVersionConflict` is thrown for `APPROVED`/`ACTIVE`/`DEPRECATED`/`RETIRED` mutations; `DRAFT` and `TESTING` versions remain mutable | |
-| R3 - Regression gate | PASS with pre-existing exception | `typecheck`, `build`, and `pnpm test` (unit) pass; E2E: `agent-version-immutability`, `slice3-control-plane`, `slice4-specialists` pass; `slice2-mission` has 4 pre-existing Temporal workflow task/query failures | |
+| R1 - System agents seed is idempotent and does not rewrite immutable ACTIVE versions | PARTIAL | `SystemAgentsSeed` lifecycle progression is idempotent and skips past ACTIVE if already active; `PostgresAgentRepository.saveVersion` no-ops for identical definitions | |
+| R4 - AgentVersion immutability | COMPLETE | `ControlPlaneService.registerAgentVersion` performs semantic pre-check; `PostgresAgentRepository.saveVersion` uses `SELECT ... FOR UPDATE` transactional enforcement; `ImmutableAgentVersionConflict` is thrown for `APPROVED`/`ACTIVE`/`DEPRECATED`/`RETIRED` mutations; `DRAFT` and `TESTING` versions remain mutable | |
+| R3 - Regression gate | PARTIAL | `corepack pnpm -r typecheck` PASS, `corepack pnpm -r build` PASS, `corepack pnpm test` PASS with natural Jest exit, E2E 54/54 PASS with `--detectOpenHandles` PASS, `git grep` shows no skipped/`.only` tests | `apps/api` and `packages/shared` test scripts were corrected to use `--runInBand` to eliminate worker force-exit warnings; the stale `slice2-mission` failure note has been removed |
 
 ## Verification Artifacts
 

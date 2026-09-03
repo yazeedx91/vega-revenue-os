@@ -6,7 +6,7 @@
     "build": "nest build",
     "dev": "nest start --watch",
     "start": "node dist/main",
-    "test": "pnpm exec jest --config ../../jest.config.js --testPathPattern=\"apps/api\" --passWithNoTests",
+    "test": "pnpm exec jest --config ../../jest.config.js --testPathPattern=\"apps/api\" --runInBand --passWithNoTests",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit"
