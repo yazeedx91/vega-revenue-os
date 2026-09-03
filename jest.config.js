@@ -14,6 +14,7 @@ module.exports = {
     '^@projectx/mission-orchestrator$': '<rootDir>/packages/mission-orchestrator/src',
     '^@projectx/outreach$': '<rootDir>/packages/outreach/src',
     '^@projectx/conversation$': '<rootDir>/packages/conversation/src',
+    '^@projectx/control-plane$': '<rootDir>/packages/control-plane/src',
     '^@projectx/temporal-client$': '<rootDir>/packages/temporal-client/src',
     '^@projectx/tool-gateway$': '<rootDir>/packages/tool-gateway/src',
     '^@projectx/llm-gateway$': '<rootDir>/packages/llm-gateway/src',

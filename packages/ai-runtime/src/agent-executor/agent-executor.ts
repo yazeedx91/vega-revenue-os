@@ -230,8 +230,10 @@ export class AgentExecutor implements IAgentExecutor {
         startedAt,
         {
           decisionId: 'unknown',
+          tenantId: request.tenantId as string,
           outcome: 'DENY' as const,
           capabilities: [],
+          evaluatedAt: new Date(),
           expiresAt: new Date(Date.now() + 60000),
         },
       );

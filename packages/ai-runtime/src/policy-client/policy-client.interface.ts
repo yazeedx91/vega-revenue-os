@@ -7,7 +7,20 @@ export interface IPolicyClient {
 
 export interface PolicyDecision {
   decisionId: string;
+  tenantId: string;
+  missionId?: string;
+  agentId?: string;
+  agentVersion?: string;
+  capability?: string;
+  action?: string;
+  tool?: string;
   outcome: 'ALLOW' | 'REQUIRE_APPROVAL' | 'DENY';
   capabilities: string[];
+  autonomyLevel?: number;
+  riskCategory?: string;
+  policyVersion?: string;
+  evaluatedAt: Date;
   expiresAt: Date;
+  correlationId?: string;
+  executionId?: string;
 }

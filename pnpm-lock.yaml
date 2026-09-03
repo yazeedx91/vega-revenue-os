@@ -268,6 +268,12 @@ importers:
       '@nestjs/core':
         specifier: ^11.1.18
         version: 11.2.1(@nestjs/common@10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/platform-express@10.4.22)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@projectx/ai-runtime':
+        specifier: workspace:*
+        version: link:../../packages/ai-runtime
+      '@projectx/control-plane':
+        specifier: workspace:*
+        version: link:../../packages/control-plane
       '@projectx/conversation':
         specifier: workspace:*
         version: link:../../packages/conversation
@@ -314,9 +320,6 @@ importers:
         specifier: ^7.8.1
         version: 7.8.2
     devDependencies:
-      '@projectx/ai-runtime':
-        specifier: workspace:*
-        version: link:../../packages/ai-runtime
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.1
@@ -350,6 +353,28 @@ importers:
         version: 5.9.3
 
   packages/application:
+    dependencies:
+      '@projectx/ai-runtime':
+        specifier: workspace:*
+        version: link:../ai-runtime
+      '@projectx/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@projectx/infrastructure':
+        specifier: workspace:*
+        version: link:../infrastructure
+      '@projectx/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  packages/control-plane:
     dependencies:
       '@projectx/ai-runtime':
         specifier: workspace:*

@@ -28,7 +28,8 @@
       "@projectx/conversation": ["./packages/conversation/src"],
       "@projectx/tool-gateway": ["./packages/tool-gateway/src"],
       "@projectx/llm-gateway": ["./packages/llm-gateway/src"],
-      "@projectx/temporal-client": ["./packages/temporal-client/src"]
+      "@projectx/temporal-client": ["./packages/temporal-client/src"],
+      "@projectx/control-plane": ["./packages/control-plane/src"]
     }
   },
   "exclude": ["node_modules", "dist", "*.d.ts"]

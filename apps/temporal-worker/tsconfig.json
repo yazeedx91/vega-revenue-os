@@ -13,6 +13,7 @@
     { "path": "../../packages/infrastructure" },
     { "path": "../../packages/shared" },
     { "path": "../../packages/ai-runtime" },
+    { "path": "../../packages/control-plane" },
     { "path": "../../packages/mission-orchestrator" },
     { "path": "../../packages/outreach" },
     { "path": "../../packages/conversation" },
