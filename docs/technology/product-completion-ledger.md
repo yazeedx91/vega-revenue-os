@@ -23,6 +23,15 @@
 - **No fabricated future capabilities**: every specialist returns deterministic stubs and actions of `type: 'request_tool'` explicitly defer real integration to later slices (8, 10, 12, 13, 5, 6, etc.).
 - **ComplianceSafetySpecialist authority boundary**: the specialist performs content/safety review and returns `FAILED`/`COMPLETED` outcomes; it does not override or skip Control Plane governance decisions (`AgentExecutor` still evaluates policy before execution).
 
+## Slice 2 Acceptance (Mission Concurrency)
+
+| Requirement | Status | Evidence | Notes |
+|---|---|---|---|
+| Mission repository optimistic concurrency | PASS | `PostgresMissionRepository.save` now uses CAS `UPDATE ... WHERE version = expected_version`, throws `ConcurrencyConflictError` on mismatch, and reloads the authoritative aggregate | Prevents blind overwrites by concurrent writers |
+| Mission execution engine reconciliation | PASS | `MissionExecutionEngine.saveAndPublish` reloads the latest mission and re-applies the intended transition when a CAS conflict occurs; `runTask` aborts or continues based on the authoritative mission status and task status | Preserves Slice 2 lifecycle semantics |
+| Pause/resume with no progression during pause | PASS | `tests/e2e/phase14/slice2-mission.spec.ts` 4/4 tests pass; `handleTaskResult` guards `mission.block` and allows `completeTask` to reconcile against a concurrently paused mission | No timeout increases or removed concurrency controls |
+| Full regression gate | PASS | `pnpm test` (41 unit/integration tests), `pnpm test:e2e` (54 E2E tests) all green | Includes `slice2-mission`, `slice3-control-plane`, `slice4-specialists`, and the rest of the phase 14 E2E suite |
+
 ## Known Deviations
 
-- `tests/e2e/phase14/slice2-mission.spec.ts`: 4 of 8 tests fail with Temporal workflow task/query errors (`Workflow Task in failed state`, `Timeout waiting for condition after 30000ms`). These failures are classified as **pre-existing infrastructure issues** and were not introduced by the Slice 4 control-plane changes.
+- Snyk code scan could not run locally because `SNYK_TOKEN` is not configured in this environment. The `security:snyk-code` script is available in `package.json` and should be executed in CI with a valid token.

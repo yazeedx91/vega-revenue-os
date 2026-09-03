@@ -80,7 +80,7 @@ export class StubMissionPlanner implements IPlanner {
     const previousVersion = mission.plan?.version ?? 0;
     const version = previousVersion > 0 ? previousVersion + 1 : 1;
     const planId = `${mission.missionId}-plan-v${version}`;
-    const taskId = `${mission.missionId}-research-task-v${version}`;
+    const taskId = `${mission.missionId}-research-task`;
     const phase: PlanPhase = {
       phaseId: `${mission.missionId}-phase-v${version}`,
       name: 'Research',
@@ -93,7 +93,11 @@ export class StubMissionPlanner implements IPlanner {
           agentVersion: '1.0.0',
           taskType: 'research',
           status: 'PENDING',
-          input: { objective: mission.objective },
+          input: {
+            researchScope: 'company',
+            companyName: mission.name,
+            domain: mission.objective,
+          },
           dependsOn: [],
           approvalGateId: null,
         },

@@ -126,39 +126,45 @@ describe('Slice 2 canonical mission E2E', () => {
       controlPlaneSeeds.research = true;
     }
 
-    const agent = await adminPool.query(
-      `SELECT 1 FROM control_plane.agent_versions
-       WHERE agent_id = $1 AND is_system = true AND version = $2 AND lifecycle = 'ACTIVE'`,
-      ['agent-1', '1.0.0'],
+    await adminPool.query(
+      `INSERT INTO control_plane.agent_versions
+         (version_id, agent_id, tenant_id, is_system, version, lifecycle, name, role, description,
+          capabilities, tools, policies, model_policy, memory_policy, knowledge_policy,
+          autonomy_level_default, evaluation_policy, owner, implementation_key, created_at, updated_at)
+       VALUES ($1, $2, null, true, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+       ON CONFLICT (version_id) DO UPDATE SET
+         implementation_key = EXCLUDED.implementation_key,
+         lifecycle = EXCLUDED.lifecycle,
+         capabilities = EXCLUDED.capabilities,
+         tools = EXCLUDED.tools,
+         policies = EXCLUDED.policies,
+         model_policy = EXCLUDED.model_policy,
+         memory_policy = EXCLUDED.memory_policy,
+         knowledge_policy = EXCLUDED.knowledge_policy,
+         autonomy_level_default = EXCLUDED.autonomy_level_default,
+         evaluation_policy = EXCLUDED.evaluation_policy,
+         updated_at = NOW()`,
+      [
+        'slice2-e2e:agent-1:1.0.0',
+        'agent-1',
+        '1.0.0',
+        'ACTIVE',
+        'Slice 2 Agent',
+        'researcher',
+        'Stub agent for Slice 2 mission E2E',
+        ['research'],
+        [],
+        JSON.stringify([]),
+        JSON.stringify({}),
+        JSON.stringify({}),
+        JSON.stringify({}),
+        5,
+        JSON.stringify({}),
+        'slice2-e2e',
+        'specialist.research.v1',
+      ],
     );
-    if (agent.rowCount === 0) {
-      await adminPool.query(
-        `INSERT INTO control_plane.agent_versions
-           (version_id, agent_id, tenant_id, is_system, version, lifecycle, name, role, description,
-            capabilities, tools, policies, model_policy, memory_policy, knowledge_policy,
-            autonomy_level_default, evaluation_policy, owner, created_at, updated_at)
-         VALUES ($1, $2, null, true, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())`,
-        [
-          'slice2-e2e:agent-1:1.0.0',
-          'agent-1',
-          '1.0.0',
-          'ACTIVE',
-          'Slice 2 Agent',
-          'researcher',
-          'Stub agent for Slice 2 mission E2E',
-          ['research'],
-          [],
-          JSON.stringify([]),
-          JSON.stringify({}),
-          JSON.stringify({}),
-          JSON.stringify({}),
-          5,
-          JSON.stringify({}),
-          'slice2-e2e',
-        ],
-      );
-      controlPlaneSeeds.agent = true;
-    }
+    controlPlaneSeeds.agent = true;
 
     // Guard against a stale Slice 3 system-hard-deny fixture blocking this run.
     await adminPool.query(

@@ -12,6 +12,7 @@ import type {
   TaskContract,
 } from '@projectx/shared';
 import type { IEventBus } from '@projectx/infrastructure';
+import { ConcurrencyConflictError } from '@projectx/infrastructure';
 import type { IAgentExecutor, IAgentRegistry, IPlanner } from '@projectx/ai-runtime';
 import type { IMissionRepository } from '../ports/mission-repository.interface';
 import type { ICompensationPort } from '../ports/compensation-port.interface';
@@ -96,7 +97,24 @@ export class MissionExecutionEngine {
       throw new Error(`Cannot mark plan valid: ${planValidResult.error.message}`);
     }
 
-    await this.saveAndPublish(ctx, mission);
+    await this.saveAndPublish(ctx, mission, async (m) => {
+      for (const taskContract of this.flattenTasks(plan)) {
+        await this.validateCapability(ctx, taskContract);
+        const taskResult = m.addTask(
+          this.mapTaskContractToProps(m, taskContract, plan.planId, correlationId),
+          correlationId,
+          this.deps.generateEventId(),
+        );
+        if (!taskResult.success) {
+          throw new Error(`Cannot add task ${taskContract.taskId}: ${taskResult.error.message}`);
+        }
+      }
+      m.plan = plan as unknown as MissionPlan;
+      const validResult = m.planValid(this.deps.generateCorrelationId(), this.deps.generateEventId());
+      if (!validResult.success) {
+        throw new Error(`Cannot mark plan valid: ${validResult.error.message}`);
+      }
+    });
   }
 
   async replanMission(ctx: TenantContext, missionId: string, newPlan?: PlanContract): Promise<void> {
@@ -124,10 +142,51 @@ export class MissionExecutionEngine {
       throw new Error(`Cannot replan mission ${missionId}: ${replanResult.error.message}`);
     }
 
-    await this.saveAndPublish(ctx, mission);
+    await this.saveAndPublish(ctx, mission, async (m) => {
+      const reResult = m.replan(
+        plan as unknown as MissionPlan,
+        taskProps,
+        this.deps.generateCorrelationId(),
+        this.deps.generateEventId(),
+      );
+      if (!reResult.success) {
+        throw new Error(`Cannot replan mission ${missionId}: ${reResult.error.message}`);
+      }
+    });
   }
 
   async runTask(ctx: TenantContext, mission: Mission, task: MissionTask): Promise<AIExecutionResult> {
+    const executionId = this.deps.generateExecutionId();
+    const pausedResult = (): AIExecutionResult => ({
+      executionId,
+      tenantId: ctx.tenantId,
+      missionId: mission.id as string,
+      status: 'PAUSED',
+      outcome: {
+        summary: 'Mission is no longer executing; aborting task execution',
+        decisions: [],
+        actions: [],
+        evidence: [],
+      },
+      modelUsage: {
+        model: 'none',
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      },
+      startedAt: new Date(),
+      completedAt: new Date(),
+      correlationId: ctx.correlationId as CorrelationId,
+      events: [],
+    });
+
+    if (mission.status !== 'EXECUTING') {
+      const latestTask = mission.tasks.find((t) => t.id === task.id);
+      if (!latestTask || latestTask.status !== 'RUNNING') {
+        return pausedResult();
+      }
+    }
+
     const startResult = mission.startTask(
       task.id,
       this.deps.generateCorrelationId(),
@@ -136,16 +195,29 @@ export class MissionExecutionEngine {
     if (!startResult.success) {
       throw new Error(`Cannot start task ${task.id}: ${startResult.error.message}`);
     }
-    await this.saveAndPublish(ctx, mission);
+    mission = await this.saveAndPublish(ctx, mission, async (m) => {
+      const r = m.startTask(task.id, this.deps.generateCorrelationId(), this.deps.generateEventId());
+      if (!r.success) {
+        throw new Error(`Cannot start task ${task.id}: ${r.error.message}`);
+      }
+    });
 
-    const executionId = this.deps.generateExecutionId();
+    if (mission.status !== 'EXECUTING') {
+      const latestTask = mission.tasks.find((t) => t.id === task.id);
+      if (!latestTask || latestTask.status !== 'RUNNING') {
+        return pausedResult();
+      }
+    }
+
     const request = this.buildExecutionRequest(ctx, mission, task, executionId);
     return this.deps.agentExecutor.execute(request);
   }
 
   async executeTask(ctx: TenantContext, mission: Mission, task: MissionTask): Promise<void> {
     const result = await this.runTask(ctx, mission, task);
-    await this.handleTaskResult(ctx, mission, task, result);
+    const latest = await this.loadMission(ctx, mission.id);
+    const latestTask = latest.tasks.find((t) => t.id === task.id);
+    await this.handleTaskResult(ctx, latest, latestTask ?? task, result);
   }
 
   async executeMissionStep(
@@ -165,7 +237,8 @@ export class MissionExecutionEngine {
       return { missionId, status: mission.status };
     }
     await this.executeTask(ctx, mission, nextTask);
-    return { missionId, status: mission.status, completedTaskId: nextTask.id as string };
+    const latest = await this.loadMission(ctx, missionId);
+    return { missionId, status: latest.status, completedTaskId: nextTask.id as string };
   }
 
   async handleTaskResult(
@@ -201,17 +274,73 @@ export class MissionExecutionEngine {
 
       await this.compensateIfNeeded(ctx, mission, task, result);
 
-      const blockResult = mission.block(
-        `Task ${task.id} failed: ${result.outcome.summary}`,
-        this.deps.generateCorrelationId(),
-        this.deps.generateEventId(),
-      );
-      if (!blockResult.success) {
-        throw new Error(`Cannot block mission: ${blockResult.error.message}`);
+      if (mission.status === 'EXECUTING') {
+        const blockResult = mission.block(
+          `Task ${task.id} failed: ${result.outcome.summary}`,
+          this.deps.generateCorrelationId(),
+          this.deps.generateEventId(),
+        );
+        if (!blockResult.success) {
+          throw new Error(`Cannot block mission: ${blockResult.error.message}`);
+        }
       }
     }
 
-    await this.saveAndPublish(ctx, mission);
+    await this.saveAndPublish(ctx, mission, async (m) => {
+      if (result.status === 'COMPLETED') {
+        const completeResult = m.completeTask(
+          task.id,
+          result.outcome,
+          this.deps.generateCorrelationId(),
+          this.deps.generateEventId(),
+        );
+        if (!completeResult.success) {
+          throw new Error(`Cannot complete task ${task.id}: ${completeResult.error.message}`);
+        }
+      } else if (result.status === 'AWAITING_APPROVAL') {
+        const markResult = m.markTaskAwaitingApproval(
+          task.id,
+          `approval:${task.id}`,
+          this.deps.generateCorrelationId(),
+          this.deps.generateEventId(),
+        );
+        if (!markResult.success) {
+          throw new Error(`Cannot mark task awaiting approval: ${markResult.error.message}`);
+        }
+        const pauseResult = m.pause(
+          `Awaiting approval for task ${task.id}`,
+          this.deps.generateCorrelationId(),
+          this.deps.generateEventId(),
+        );
+        if (!pauseResult.success) {
+          throw new Error(`Cannot pause mission for approval: ${pauseResult.error.message}`);
+        }
+      } else if (
+        result.status === 'FAILED' ||
+        result.status === 'TIMED_OUT' ||
+        result.status === 'CANCELLED'
+      ) {
+        const failResult = m.failTask(
+          task.id,
+          result.outcome.summary,
+          this.deps.generateCorrelationId(),
+          this.deps.generateEventId(),
+        );
+        if (!failResult.success) {
+          throw new Error(`Cannot fail task ${task.id}: ${failResult.error.message}`);
+        }
+        if (m.status === 'EXECUTING') {
+          const blockResult = m.block(
+            `Task ${task.id} failed: ${result.outcome.summary}`,
+            this.deps.generateCorrelationId(),
+            this.deps.generateEventId(),
+          );
+          if (!blockResult.success) {
+            throw new Error(`Cannot block mission: ${blockResult.error.message}`);
+          }
+        }
+      }
+    });
   }
 
   async evaluateCompletion(ctx: TenantContext, mission: Mission): Promise<void> {
@@ -235,7 +364,28 @@ export class MissionExecutionEngine {
         throw new Error(`Cannot fail mission: ${result.error.message}`);
       }
     }
-    await this.saveAndPublish(ctx, mission);
+    await this.saveAndPublish(ctx, mission, async (m) => {
+      const allCompleted = m.tasks.every((t) => t.status === 'COMPLETED');
+      if (allCompleted) {
+        const r = m.complete(
+          { meetingsBooked: 0, opportunitiesCreated: 0 },
+          this.deps.generateCorrelationId(),
+          this.deps.generateEventId(),
+        );
+        if (!r.success) {
+          throw new Error(`Cannot complete mission: ${r.error.message}`);
+        }
+      } else {
+        const r = m.fail(
+          'No runnable tasks remain and not all tasks completed',
+          this.deps.generateCorrelationId(),
+          this.deps.generateEventId(),
+        );
+        if (!r.success) {
+          throw new Error(`Cannot fail mission: ${r.error.message}`);
+        }
+      }
+    });
   }
 
   private async requestApproval(
@@ -421,12 +571,36 @@ export class MissionExecutionEngine {
     return mission;
   }
 
-  private async saveAndPublish(ctx: TenantContext, mission: Mission): Promise<void> {
-    await this.deps.missionRepository.save(ctx, mission);
-    for (const event of mission.domainEvents) {
-      await this.deps.eventBus.publish(event);
+  private async saveAndPublish(
+    ctx: TenantContext,
+    mission: Mission,
+    reapply: (m: Mission) => Promise<void>,
+  ): Promise<Mission> {
+    let current = mission;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await this.deps.missionRepository.save(ctx, current);
+        for (const event of current.domainEvents) {
+          await this.deps.eventBus.publish(event);
+        }
+        current.clearDomainEvents();
+        return current;
+      } catch (err) {
+        if (err instanceof ConcurrencyConflictError && attempt < 2) {
+          const latest = await this.loadMission(ctx, current.id);
+          try {
+            await reapply(latest);
+          } catch {
+            // Authoritative state already satisfies or conflicts with the intended transition.
+            return latest;
+          }
+          current = latest;
+          continue;
+        }
+        throw err;
+      }
     }
-    mission.clearDomainEvents();
+    return current;
   }
 
   private flattenTasks(plan: PlanContract): TaskContract[] {
