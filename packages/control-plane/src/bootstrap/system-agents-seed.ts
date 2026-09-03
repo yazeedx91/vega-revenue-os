@@ -60,9 +60,19 @@ export class SystemAgentsSeed {
       };
 
       await controlPlaneService.registerAgentVersion(ctx, version);
-      await agentLifecycleService.transition(ctx, def.agentId, contract.version, 'TESTING');
-      await agentLifecycleService.transition(ctx, def.agentId, contract.version, 'APPROVED');
-      await agentLifecycleService.transition(ctx, def.agentId, contract.version, 'ACTIVE');
+      const states: AgentLifecycle[] = ['DRAFT', 'TESTING', 'APPROVED', 'ACTIVE'];
+      const existing = await this.deps.controlPlane.agentRepository.getActiveVersion(
+        ctx,
+        def.agentId,
+        contract.version,
+      );
+      const currentIndex = existing ? states.indexOf(existing.lifecycle) : -1;
+      const targetIndex = states.indexOf('ACTIVE');
+      if (currentIndex !== -1 && currentIndex < targetIndex) {
+        for (let i = currentIndex; i < targetIndex; i++) {
+          await agentLifecycleService.transition(ctx, def.agentId, contract.version, states[i + 1]);
+        }
+      }
     }
   }
 }

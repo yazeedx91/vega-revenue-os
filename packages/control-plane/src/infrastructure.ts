@@ -2,6 +2,7 @@ import type { TenantContext } from '@projectx/domain';
 import type { AIExecutionRequest } from '@projectx/shared';
 import { PostgresClient } from '@projectx/infrastructure';
 import type { IAuditLog } from '@projectx/infrastructure';
+import { ImmutableAgentVersionConflict } from './domain';
 import type {
   AgentVersion,
   AutonomyRule,
@@ -23,11 +24,49 @@ export interface PostgresControlPlaneRepositoryConfig {
   readonly client: PostgresClient;
 }
 
+function safeJson(a: unknown): string {
+  return JSON.stringify(a, (_k, v) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      return Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a as string).localeCompare(b as string)));
+    }
+    return v;
+  }) ?? '';
+}
+
+function areVersionDefinitionsEqual(a: AgentVersion, b: AgentVersion): string | null {
+  if (a.implementationKey !== b.implementationKey) return `implementationKey: ${a.implementationKey} != ${b.implementationKey}`;
+  if (a.tenantId !== b.tenantId) return `tenantId: ${a.tenantId} != ${b.tenantId}`;
+  if (a.isSystem !== b.isSystem) return `isSystem: ${a.isSystem} != ${b.isSystem}`;
+  const ad = a.definition;
+  const bd = b.definition;
+  if (ad.name !== bd.name) return `name: ${ad.name} != ${bd.name}`;
+  if (ad.role !== bd.role) return `role: ${ad.role} != ${bd.role}`;
+  if (ad.description !== bd.description) return `description: ${ad.description} != ${bd.description}`;
+  if (safeJson(ad.capabilities) !== safeJson(bd.capabilities)) return `capabilities: ${safeJson(ad.capabilities)} != ${safeJson(bd.capabilities)}`;
+  if (safeJson(ad.tools) !== safeJson(bd.tools)) return `tools: ${safeJson(ad.tools)} != ${safeJson(bd.tools)}`;
+  if (safeJson(ad.policies) !== safeJson(bd.policies)) return `policies: ${safeJson(ad.policies)} != ${safeJson(bd.policies)}`;
+  if (safeJson(ad.modelPolicy) !== safeJson(bd.modelPolicy)) return `modelPolicy: ${safeJson(ad.modelPolicy)} != ${safeJson(bd.modelPolicy)}`;
+  if (safeJson(ad.memoryPolicy) !== safeJson(bd.memoryPolicy)) return `memoryPolicy: ${safeJson(ad.memoryPolicy)} != ${safeJson(bd.memoryPolicy)}`;
+  if (safeJson(ad.knowledgePolicy) !== safeJson(bd.knowledgePolicy)) return `knowledgePolicy: ${safeJson(ad.knowledgePolicy)} != ${safeJson(bd.knowledgePolicy)}`;
+  if (ad.autonomyLevelDefault !== bd.autonomyLevelDefault) return `autonomyLevelDefault: ${ad.autonomyLevelDefault} != ${bd.autonomyLevelDefault}`;
+  if (safeJson(ad.evaluationPolicy) !== safeJson(bd.evaluationPolicy)) return `evaluationPolicy: ${safeJson(ad.evaluationPolicy)} != ${safeJson(bd.evaluationPolicy)}`;
+  if (ad.owner !== bd.owner) return `owner: ${ad.owner} != ${bd.owner}`;
+  return null;
+}
+
+function isMutableAgentLifecycle(lifecycle: AgentVersion['lifecycle']): boolean {
+  return lifecycle === 'DRAFT' || lifecycle === 'TESTING';
+}
+
 function mapAgentVersion(row: Record<string, unknown>): AgentVersion {
-  const policies =
+  let rawPolicies =
     typeof row.policies === 'string'
       ? JSON.parse(row.policies as string)
       : (row.policies ?? []);
+  if (!Array.isArray(rawPolicies) && rawPolicies && Object.keys(rawPolicies).length === 0) {
+    rawPolicies = [];
+  }
+  const policies = Array.isArray(rawPolicies) ? rawPolicies : [];
   return {
     versionId: row.version_id as string,
     agentId: row.agent_id as string,
@@ -111,40 +150,86 @@ export class PostgresAgentRepository implements IAgentRepository {
   }
 
   async saveVersion(ctx: TenantContext, version: AgentVersion): Promise<void> {
-    return this.config.client.withTenant(ctx, async (client) => {
-      const sql = `
-        INSERT INTO control_plane.agent_versions
+    return this.config.client.transaction(ctx, async (client) => {
+      const existingResult = await client.query<Record<string, unknown>>(
+        `SELECT * FROM control_plane.agent_versions
+         WHERE version_id = $1
+           AND (is_system = true OR tenant_id = current_setting('app.current_tenant', true))
+         FOR UPDATE`,
+        [version.versionId],
+      );
+      const d = version.definition;
+      const jsonb = (v: unknown) => JSON.stringify(v);
+      const existingRow = (existingResult.rows ?? [])[0];
+      if (existingRow) {
+        const existing = mapAgentVersion(existingRow);
+        const diff = areVersionDefinitionsEqual(existing, version);
+        if (diff === null) {
+          return;
+        }
+        if (!isMutableAgentLifecycle(existing.lifecycle)) {
+          throw new ImmutableAgentVersionConflict(
+            version.agentId,
+            version.version,
+            diff + ' in ' + existing.lifecycle + ' version',
+          );
+        }
+        await client.query(
+          `UPDATE control_plane.agent_versions
+           SET lifecycle = $1, name = $2, role = $3, description = $4,
+               capabilities = $5, tools = $6, policies = $7, model_policy = $8,
+               memory_policy = $9, knowledge_policy = $10, autonomy_level_default = $11,
+               evaluation_policy = $12, owner = $13, implementation_key = $14,
+               updated_at = NOW()
+           WHERE version_id = $15`,
+          [
+            version.lifecycle,
+            d.name,
+            d.role,
+            d.description,
+            d.capabilities,
+            d.tools,
+            jsonb(d.policies),
+            jsonb(d.modelPolicy),
+            jsonb(d.memoryPolicy),
+            jsonb(d.knowledgePolicy),
+            d.autonomyLevelDefault,
+            jsonb(d.evaluationPolicy),
+            d.owner,
+            version.implementationKey,
+            version.versionId,
+          ],
+        );
+        return;
+      }
+      await client.query(
+        `INSERT INTO control_plane.agent_versions
           (version_id, agent_id, tenant_id, is_system, version, lifecycle, name, role, description,
            capabilities, tools, policies, model_policy, memory_policy, knowledge_policy,
            autonomy_level_default, evaluation_policy, owner, implementation_key, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
-        ON CONFLICT (version_id) DO UPDATE SET
-          lifecycle = EXCLUDED.lifecycle,
-          implementation_key = EXCLUDED.implementation_key,
-          updated_at = NOW()
-      `;
-      const d = version.definition;
-      await client.query(sql, [
-        version.versionId,
-        version.agentId,
-        version.tenantId,
-        version.isSystem,
-        version.version,
-        version.lifecycle,
-        d.name,
-        d.role,
-        d.description,
-        d.capabilities,
-        d.tools,
-        d.policies,
-        d.modelPolicy,
-        d.memoryPolicy,
-        d.knowledgePolicy,
-        d.autonomyLevelDefault,
-        d.evaluationPolicy,
-        d.owner,
-        version.implementationKey,
-      ]);
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())`,
+        [
+          version.versionId,
+          version.agentId,
+          version.tenantId,
+          version.isSystem,
+          version.version,
+          version.lifecycle,
+          d.name,
+          d.role,
+          d.description,
+          d.capabilities,
+          d.tools,
+          jsonb(d.policies),
+          jsonb(d.modelPolicy),
+          jsonb(d.memoryPolicy),
+          jsonb(d.knowledgePolicy),
+          d.autonomyLevelDefault,
+          jsonb(d.evaluationPolicy),
+          d.owner,
+          version.implementationKey,
+        ],
+      );
     });
   }
 

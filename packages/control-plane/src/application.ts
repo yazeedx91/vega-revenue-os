@@ -8,6 +8,8 @@ import {
   evaluateAutonomy,
   mergePolicyOutcomes,
   tightenOutcome,
+  isMutableAgentLifecycle,
+  ImmutableAgentVersionConflict,
   type AgentVersion,
   type AutonomyRule,
   type Capability,
@@ -251,10 +253,64 @@ export interface ControlPlaneServiceDependencies {
   readonly auditSink: IAuditSink;
 }
 
+function safeJson(a: unknown): string {
+  return JSON.stringify(a, (_k, v) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      return Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a as string).localeCompare(b as string)));
+    }
+    return v;
+  }) ?? '';
+}
+
+function areVersionDefinitionsEqual(a: AgentVersion, b: AgentVersion): string | null {
+  if (a.implementationKey !== b.implementationKey) return `implementationKey: ${a.implementationKey} != ${b.implementationKey}`;
+  if (a.tenantId !== b.tenantId) return `tenantId: ${a.tenantId} != ${b.tenantId}`;
+  if (a.isSystem !== b.isSystem) return `isSystem: ${a.isSystem} != ${b.isSystem}`;
+  const ad = a.definition;
+  const bd = b.definition;
+  if (ad.name !== bd.name) return `name: ${ad.name} != ${bd.name}`;
+  if (ad.role !== bd.role) return `role: ${ad.role} != ${bd.role}`;
+  if (ad.description !== bd.description) return `description: ${ad.description} != ${bd.description}`;
+  if (safeJson(ad.capabilities) !== safeJson(bd.capabilities)) return `capabilities: ${safeJson(ad.capabilities)} != ${safeJson(bd.capabilities)}`;
+  if (safeJson(ad.tools) !== safeJson(bd.tools)) return `tools: ${safeJson(ad.tools)} != ${safeJson(bd.tools)}`;
+  if (safeJson(ad.policies) !== safeJson(bd.policies)) return `policies: ${safeJson(ad.policies)} != ${safeJson(bd.policies)}`;
+  if (safeJson(ad.modelPolicy) !== safeJson(bd.modelPolicy)) return `modelPolicy: ${safeJson(ad.modelPolicy)} != ${safeJson(bd.modelPolicy)}`;
+  if (safeJson(ad.memoryPolicy) !== safeJson(bd.memoryPolicy)) return `memoryPolicy: ${safeJson(ad.memoryPolicy)} != ${safeJson(bd.memoryPolicy)}`;
+  if (safeJson(ad.knowledgePolicy) !== safeJson(bd.knowledgePolicy)) return `knowledgePolicy: ${safeJson(ad.knowledgePolicy)} != ${safeJson(bd.knowledgePolicy)}`;
+  if (ad.autonomyLevelDefault !== bd.autonomyLevelDefault) return `autonomyLevelDefault: ${ad.autonomyLevelDefault} != ${bd.autonomyLevelDefault}`;
+  if (safeJson(ad.evaluationPolicy) !== safeJson(bd.evaluationPolicy)) return `evaluationPolicy: ${safeJson(ad.evaluationPolicy)} != ${safeJson(bd.evaluationPolicy)}`;
+  if (ad.owner !== bd.owner) return `owner: ${ad.owner} != ${bd.owner}`;
+  return null;
+}
+
 export class ControlPlaneService {
   constructor(private readonly deps: ControlPlaneServiceDependencies) {}
 
   async registerAgentVersion(ctx: TenantContext, version: AgentVersion): Promise<void> {
+    const existing = await this.deps.agentRepository.getActiveVersion(
+      ctx,
+      version.agentId,
+      version.version,
+    );
+    if (existing) {
+      const diff = areVersionDefinitionsEqual(existing, version);
+      if (diff === null) {
+        await this.deps.auditSink.record(ctx, 'agent-registered', 'success', {
+          agentId: version.agentId,
+          version: version.version,
+          lifecycle: existing.lifecycle,
+          idempotent: true,
+        });
+        return;
+      }
+      if (!isMutableAgentLifecycle(existing.lifecycle)) {
+        throw new ImmutableAgentVersionConflict(
+          version.agentId,
+          version.version,
+          diff + ' in ' + existing.lifecycle + ' version',
+        );
+      }
+    }
     await this.deps.agentRepository.saveVersion(ctx, version);
     await this.deps.auditSink.record(ctx, 'agent-registered', 'success', {
       agentId: version.agentId,

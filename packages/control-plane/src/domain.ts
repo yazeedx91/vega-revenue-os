@@ -27,6 +27,21 @@ export function canTransitionAgentLifecycle(
   return ALLOWED_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
+export function isMutableAgentLifecycle(lifecycle: AgentLifecycle): boolean {
+  return lifecycle === 'DRAFT' || lifecycle === 'TESTING';
+}
+
+export class ImmutableAgentVersionConflict extends Error {
+  constructor(
+    public readonly agentId: string,
+    public readonly version: string,
+    public readonly reason: string,
+  ) {
+    super(`Immutable version conflict for ${agentId}@${version}: ${reason}`);
+    this.name = 'ImmutableAgentVersionConflict';
+  }
+}
+
 export interface AgentVersion {
   readonly versionId: string;
   readonly agentId: string;
