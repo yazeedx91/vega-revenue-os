@@ -152,6 +152,38 @@ describe('Slice 3 Control Plane E2E', () => {
   });
 
   afterAll(async () => {
+    if (postgresClient) {
+      const adminCtx = makeContext(TENANT_A);
+      await postgresClient.withTenant(adminCtx, async (client) => {
+        await client.query(
+          `DELETE FROM control_plane.policies
+           WHERE policy_id = 'system-hard-deny' AND is_system = true`
+        );
+      });
+      for (const tenant of [TENANT_A, TENANT_B]) {
+        const ctx = makeContext(tenant);
+        await postgresClient.withTenant(ctx, async (client) => {
+          await client.query(
+            `DELETE FROM control_plane.agent_versions
+             WHERE agent_id = $1
+               AND (is_system = true OR tenant_id = current_setting('app.current_tenant', true))`,
+            [AGENT_ID],
+          );
+          await client.query(
+            `DELETE FROM control_plane.policies
+             WHERE tenant_id = current_setting('app.current_tenant', true)
+               AND policy_id IN ($1, $2, $3)`,
+            [`${tenant}-allow`, `${tenant}-deny`, `${tenant}-require_approval`],
+          );
+          await client.query(
+            `DELETE FROM control_plane.emergency_stop
+             WHERE tenant_id = current_setting('app.current_tenant', true)
+               AND stop_id = $1`,
+            [`${tenant}-stop`],
+          );
+        });
+      }
+    }
     await pool?.end();
   });
 
