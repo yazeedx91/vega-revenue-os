@@ -4,9 +4,15 @@
 
 | Requirement | Status | Evidence | Notes |
 |---|---|---|---|
-| R1 - System agents seed is idempotent and does not rewrite immutable ACTIVE versions | PARTIAL | `SystemAgentsSeed` lifecycle progression is idempotent and skips past ACTIVE if already active; `PostgresAgentRepository.saveVersion` no-ops for identical definitions | |
-| R4 - AgentVersion immutability | COMPLETE | `ControlPlaneService.registerAgentVersion` performs semantic pre-check; `PostgresAgentRepository.saveVersion` uses `SELECT ... FOR UPDATE` transactional enforcement; `ImmutableAgentVersionConflict` is thrown for `APPROVED`/`ACTIVE`/`DEPRECATED`/`RETIRED` mutations; `DRAFT` and `TESTING` versions remain mutable | |
-| R3 - Regression gate | PARTIAL | `corepack pnpm -r typecheck` PASS, `corepack pnpm -r build` PASS, `corepack pnpm test` PASS with natural Jest exit, E2E 54/54 PASS with `--detectOpenHandles` PASS, `git grep` shows no skipped/`.only` tests | `apps/api` and `packages/shared` test scripts were corrected to use `--runInBand` to eliminate worker force-exit warnings; the stale `slice2-mission` failure note has been removed |
+| R1 — Cognitive loop | PARTIAL | Partial acceptance; full cognitive-loop validation deferred to later slice | |
+| R3 — AgentExecutor | PARTIAL | Partial acceptance; full AgentExecutor validation deferred to later slice | |
+| R4 — 11 specialist agents | COMPLETE | All 11 production specialist implementations are registered, ACTIVE, selectable through the real Control Plane, resolved by `implementationKey`, invoked through `AgentExecutor`, and validated by `tests/e2e/phase14/slice4-specialists.spec.ts` | |
+
+### Slice 4 Acceptance Invariants (not canonical requirement IDs)
+
+- **AgentVersion immutability** — `ControlPlaneService.registerAgentVersion` performs semantic pre-check; `PostgresAgentRepository.saveVersion` uses `SELECT ... FOR UPDATE` transactional enforcement; `ImmutableAgentVersionConflict` is thrown for `APPROVED`/`ACTIVE`/`DEPRECATED`/`RETIRED` mutations.
+- **System agents seed** — `SystemAgentsSeed` lifecycle progression is idempotent and skips past ACTIVE if already active; `PostgresAgentRepository.saveVersion` no-ops for identical definitions.
+- **Regression gate** — `corepack pnpm -r typecheck` PASS, `corepack pnpm -r build` PASS, `corepack pnpm test` PASS with natural Jest exit, E2E 54/54 PASS with `--detectOpenHandles` PASS, `git grep` shows no skipped/`.only` tests; `apps/api` and `packages/shared` test scripts were corrected to use `--runInBand` to eliminate worker force-exit warnings.
 
 ## Verification Artifacts
 
