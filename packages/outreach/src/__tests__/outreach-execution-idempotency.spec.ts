@@ -228,24 +228,33 @@ describe('OutreachExecutionService production idempotency hardening', () => {
     expect(execution?.status).toBe('PENDING_APPROVAL');
   });
 
-  it('stale PENDING idempotency record prevents duplicate provider submission and moves to DELIVERY_UNKNOWN', async () => {
+  it('stale PENDING idempotency record with evidence of an attempted submission moves to DELIVERY_UNKNOWN', async () => {
     const deps = await buildHarness();
     const { executionId, idempotencyKey } = await createApprovedExecution(deps);
 
-    // Simulate a prior crash that reserved the idempotency key but never resolved
-    // the provider outcome.
+    // Simulate a prior crash that reserved the idempotency key, advanced the
+    // execution to SENDING, and attempted a provider send before crashing.
+    const execution = await deps.executionRepo.load(ctx, executionId as any);
+    if (!execution) throw new Error('Execution not found in test setup');
+    const approveResult = execution.approve('approval-1' as any, ctx.correlationId, 'evt-approve' as any);
+    if (!approveResult.success) throw new Error(approveResult.error.message);
+    const sendingResult = execution.markSending(ctx.correlationId, 'evt-sending' as any);
+    if (!sendingResult.success) throw new Error(sendingResult.error.message);
+    execution.markProviderAttempt('spy-email');
+    await deps.executionRepo.save(ctx, execution);
+
     await deps.idempotencyStore.set(
       ctx,
       'outreach:send',
       idempotencyKey,
-      {},
-      { status: 'PENDING' },
+      { submitted: false },
+      { status: 'PENDING', ttlSeconds: -86400 },
     );
 
     const result = await deps.executionService.executeApprovedSend(ctx, executionId as any, 'approval-1' as any);
 
     expect(result.status).toBe('FAILED');
-    expect((result as any).reason).toContain('reconciliation required');
+    expect((result as any).reason).toContain('outcome unknown');
     expect(deps.provider.sendCalls).toHaveLength(0);
 
     const reloaded = await deps.executionRepo.load(ctx, executionId as any);
@@ -358,7 +367,7 @@ describe('OutreachExecutionService production idempotency hardening', () => {
     expect(terminalStatuses).toContain(second.status);
 
     const reloaded = await deps.executionRepo.load(ctx, executionId as any);
-    expect(['DELIVERY_PENDING', 'DELIVERY_UNKNOWN', 'FAILED_PRE_SUBMISSION', 'FAILED']).toContain(reloaded?.status);
+    expect(['DELIVERY_PENDING', 'FAILED_PRE_SUBMISSION', 'FAILED']).toContain(reloaded?.status);
   });
 
   it('calling executeApprovedSend again after a successful prior completion is a no-op (Temporal retry safety)', async () => {
@@ -377,16 +386,17 @@ describe('OutreachExecutionService production idempotency hardening', () => {
     expect(record?.status).toBe('COMPLETED');
   });
 
-  it('a stale PENDING idempotency record from a prior crash before provider invocation prevents duplicate submission', async () => {
+  it('a stale PENDING idempotency record from a prior crash before provider invocation prevents duplicate submission without implying ambiguity', async () => {
     const deps = await buildHarness();
     const { executionId, idempotencyKey } = await createApprovedExecution(deps);
 
+    // Expire the PENDING claim, but the execution has no provider-attempt evidence.
     await deps.idempotencyStore.set(
       ctx,
       'outreach:send',
       idempotencyKey,
-      {},
-      { status: 'PENDING' },
+      { submitted: false },
+      { status: 'PENDING', ttlSeconds: -86400 },
     );
 
     const result = await deps.executionService.executeApprovedSend(ctx, executionId as any, 'approval-1' as any);
@@ -395,8 +405,13 @@ describe('OutreachExecutionService production idempotency hardening', () => {
     expect((result as any).reason).toContain('reconciliation required');
     expect(deps.provider.sendCalls).toHaveLength(0);
 
+    // Expiry alone does not prove an ambiguous provider submission, so the
+    // execution is left in an in-progress SENDING state (no provider attempt
+    // persisted) and the PENDING idempotency record is preserved (non-reclaimable).
     const reloaded = await deps.executionRepo.load(ctx, executionId as any);
-    expect(reloaded?.status).toBe('DELIVERY_UNKNOWN');
+    expect(reloaded?.status).toBe('SENDING');
+    expect(reloaded?.attempts).toBe(0);
+    expect(reloaded?.providerId).toBeUndefined();
 
     const record = await deps.idempotencyStore.get(ctx, 'outreach:send', idempotencyKey);
     expect(record?.status).toBe('PENDING');

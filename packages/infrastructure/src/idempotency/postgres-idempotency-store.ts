@@ -23,8 +23,8 @@ export class PostgresIdempotencyStore implements IIdempotencyStore {
   async get<TResult>(ctx: TenantContext, scope: string, key: IdempotencyKey): Promise<IdempotencyRecord<TResult> | undefined> {
     const result = await this.client.withTenant(ctx, async (client) => {
       return client.query(
-        `SELECT status, result, created_at FROM idempotency.keys
-         WHERE tenant_id = $1 AND scope = $2 AND key = $3 AND expires_at > NOW()`,
+        `SELECT status, result, created_at, expires_at FROM idempotency.keys
+         WHERE tenant_id = $1 AND scope = $2 AND key = $3`,
         [ctx.tenantId as string, scope, key as string],
       );
     });
@@ -38,6 +38,7 @@ export class PostgresIdempotencyStore implements IIdempotencyStore {
       status: row.status,
       result: row.result as TResult,
       createdAt: row.created_at as Date,
+      expiresAt: row.expires_at ? new Date(row.expires_at as string) : undefined,
     };
   }
 
@@ -94,7 +95,7 @@ export class PostgresIdempotencyStore implements IIdempotencyStore {
            expires_at = EXCLUDED.expires_at
          WHERE idempotency.keys.status = 'FAILED'
            AND (idempotency.keys.result->>'submitted')::boolean = false
-         RETURNING status, result, created_at`,
+         RETURNING status, result, created_at, expires_at`,
         [ctx.tenantId as string, scope, key as string, JSON.stringify(null), expiresAt],
       );
     });

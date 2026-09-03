@@ -15,8 +15,11 @@ export class InMemoryIdempotencyStore implements IIdempotencyStore {
 
   async get<TResult>(ctx: TenantContext, scope: string, key: IdempotencyKey): Promise<IdempotencyRecord<TResult> | undefined> {
     const k = this.key(ctx, scope, key);
-    if (this.isExpired(k)) return undefined;
-    return this.entries.get(k) as IdempotencyRecord<TResult> | undefined;
+    const record = this.entries.get(k) as IdempotencyRecord<TResult> | undefined;
+    if (!record) return undefined;
+    const expiresAt = this.expiries.get(k);
+    if (expiresAt === undefined) return record;
+    return { ...record, expiresAt: new Date(expiresAt) };
   }
 
   async set<TResult>(
@@ -28,15 +31,22 @@ export class InMemoryIdempotencyStore implements IIdempotencyStore {
   ): Promise<void> {
     const k = this.key(ctx, scope, key);
     const status = options?.status ?? 'COMPLETED';
+    const ttlMs =
+      options?.ttlSeconds !== undefined
+        ? options.ttlSeconds * 1000
+        : status === 'PENDING'
+        ? NEVER_EXPIRE_MS
+        : 86400 * 1000;
+    const expiresAt = Date.now() + ttlMs;
     this.entries.set(k, {
       result,
       createdAt: new Date(),
+      expiresAt: new Date(expiresAt),
       status,
     });
     // PENDING records represent a possibly-submitted provider request and must
     // never be pruned by a TTL. COMPLETED/FAILED records can still expire.
-    const ttlMs = status === 'PENDING' ? NEVER_EXPIRE_MS : (options?.ttlSeconds ?? 86400) * 1000;
-    this.expiries.set(k, Date.now() + ttlMs);
+    this.expiries.set(k, expiresAt);
   }
 
   /**
@@ -64,12 +74,23 @@ export class InMemoryIdempotencyStore implements IIdempotencyStore {
         existing.result !== null &&
         (existing.result as Record<string, unknown>).submitted === false;
       if (!canReclaim) {
-        return { claimed: false, existing: existing as IdempotencyRecord<TResult> };
+        const expiresAt = this.expiries.get(k);
+        const record = { ...(existing as IdempotencyRecord<TResult>) };
+        if (expiresAt !== undefined) {
+          (record as { expiresAt?: Date }).expiresAt = new Date(expiresAt);
+        }
+        return { claimed: false, existing: record };
       }
     }
-    this.entries.set(k, { result: undefined as unknown as TResult, createdAt: new Date(), status: 'PENDING' });
+    const expiresAt = Date.now() + NEVER_EXPIRE_MS;
+    this.entries.set(k, {
+      result: undefined as unknown as TResult,
+      createdAt: new Date(),
+      expiresAt: new Date(expiresAt),
+      status: 'PENDING',
+    });
     // PENDING records must never expire while they are unresolved.
-    this.expiries.set(k, Date.now() + NEVER_EXPIRE_MS);
+    this.expiries.set(k, expiresAt);
     return { claimed: true };
   }
 

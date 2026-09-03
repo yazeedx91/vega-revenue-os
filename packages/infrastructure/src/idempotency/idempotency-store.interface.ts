@@ -4,6 +4,7 @@ import type { TenantContext } from '@projectx/domain';
 export interface IdempotencyRecord<TResult> {
   readonly result: TResult;
   readonly createdAt: Date;
+  readonly expiresAt?: Date;
   readonly status: 'PENDING' | 'COMPLETED' | 'FAILED';
 }
 

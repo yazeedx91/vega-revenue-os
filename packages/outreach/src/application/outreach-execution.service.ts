@@ -473,57 +473,168 @@ export class OutreachExecutionService {
 
   private async handleDuplicateSendIdempotency(
     ctx: TenantContext,
-    execution: OutreachMessageExecutionType,
+    localExecution: OutreachMessageExecutionType,
     executionId: OutreachExecutionId,
   ): Promise<ExecuteSendResult> {
+    // The loser must never make decisions on a stale in-memory snapshot. It has
+    // to reread the authoritative idempotency record and execution aggregate
+    // before resolving the duplicate-send race.
     const existing = await this.deps.idempotencyStore?.get<{
       submitted?: boolean;
       providerMessageId?: string;
       internetMessageId?: string;
       reason?: string;
-    }>(ctx, IDEMPOTENCY_SCOPE, execution.idempotencyKey);
+    }>(ctx, IDEMPOTENCY_SCOPE, localExecution.idempotencyKey);
+    const reloaded = await this.deps.executionRepository.load(ctx, executionId);
+
+    if (!reloaded) {
+      return { status: 'FAILED', executionId, reason: 'Execution not found after duplicate send' };
+    }
 
     if (existing?.status === 'COMPLETED') {
-      // A COMPLETED idempotency record means the provider accepted the send in
-      // a prior attempt. Recover the execution to a terminal success state and
-      // never contact the provider again.
-      if (!this.isTerminalFailure(execution.status)) {
-        const acceptResult = execution.markProviderAccepted(
+      // A COMPLETED idempotency record means a prior provider submission was
+      // accepted. Reconcile the execution to a terminal success state only if
+      // it has not already advanced, and never overwrite a newer winner state.
+      if (this.shouldRecoverToDeliveryPending(reloaded.status)) {
+        this.advanceToDeliveryPending(
+          reloaded,
           existing.result?.providerMessageId,
           existing.result?.internetMessageId,
-          undefined,
           ctx.correlationId as CorrelationId,
           this.deps.generateEventId(),
         );
-        if (acceptResult.success) {
-          execution.markDeliveryPending(ctx.correlationId as CorrelationId, this.deps.generateEventId());
-        }
-        await this.deps.executionRepository.save(ctx, execution);
+        await this.saveAuthoritative(ctx, reloaded, executionId);
       }
-      return { status: 'COMPLETED', executionId };
+      return this.resultFromExecution(reloaded, executionId);
     }
 
     if (existing?.status === 'PENDING') {
-      execution.markDeliveryUnknown(
-        'Prior submission attempt still in flight at provider; outcome unknown',
+      const isExpired = this.isExpiredIdempotency(existing);
+      const inFlightStatus = reloaded.status === 'SENDING' || reloaded.status === 'APPROVED';
+      const attemptedSubmission = reloaded.attempts > 0 || reloaded.providerId !== undefined;
+
+      // If the execution has already advanced past the submission point, the
+      // authoritative execution state wins regardless of the idempotency record.
+      if (this.isPositiveTerminal(reloaded.status)) {
+        return this.resultFromExecution(reloaded, executionId);
+      }
+
+      // A live PENDING idempotency record means another worker may still own the
+      // send. Do not resend, do not persist DELIVERY_UNKNOWN, and do not mutate
+      // a concurrent newer execution state.
+      if (!isExpired) {
+        return { status: 'FAILED', executionId, reason: 'Delivery outcome unknown after prior attempt; reconciliation required' };
+      }
+
+      // A stale (expired) PENDING claim does NOT, by itself, prove a submission
+      // occurred. Only persist DELIVERY_UNKNOWN when the authoritative execution
+      // itself shows that a provider submission was attempted and the outcome is
+      // genuinely ambiguous.
+      if (inFlightStatus && attemptedSubmission) {
+        reloaded.markDeliveryUnknown(
+          'Prior submission attempt reached the provider before the idempotency claim expired; outcome unknown',
+          ctx.correlationId as CorrelationId,
+          this.deps.generateEventId(),
+        );
+        await this.saveAuthoritative(ctx, reloaded, executionId);
+      }
+
+      return this.resultFromExecution(reloaded, executionId);
+    }
+
+    if (existing?.status === 'FAILED' && existing.result?.submitted === false) {
+      // A FAILED idempotency record that provably had no submission can only
+      // be safely reclaimed through the atomic safety-gate claim(). If the gate
+      // denied us, we must not resend from this duplicate path.
+      if (this.isTerminalFailure(reloaded.status) || this.isPositiveTerminal(reloaded.status)) {
+        return this.resultFromExecution(reloaded, executionId);
+      }
+      reloaded.markRequiresReconciliation(
+        existing.result?.reason ?? 'Idempotency record exists but does not prove the submission was not sent',
         ctx.correlationId as CorrelationId,
         this.deps.generateEventId(),
       );
-      await this.deps.executionRepository.save(ctx, execution);
-      return {
-        status: 'FAILED',
-        executionId,
-        reason: 'Delivery outcome unknown after prior attempt; reconciliation required',
-      };
+      await this.saveAuthoritative(ctx, reloaded, executionId);
+      return this.resultFromExecution(reloaded, executionId);
     }
 
-    execution.markRequiresReconciliation(
+    if (this.isTerminalFailure(reloaded.status) || this.isPositiveTerminal(reloaded.status)) {
+      return this.resultFromExecution(reloaded, executionId);
+    }
+    reloaded.markRequiresReconciliation(
       existing?.result?.reason ?? 'Idempotency record exists but does not prove the submission was not sent',
       ctx.correlationId as CorrelationId,
       this.deps.generateEventId(),
     );
-    await this.deps.executionRepository.save(ctx, execution);
-    return { status: 'FAILED', executionId, reason: 'Reconciliation required before retry' };
+    await this.saveAuthoritative(ctx, reloaded, executionId);
+    return this.resultFromExecution(reloaded, executionId);
+  }
+
+  private shouldRecoverToDeliveryPending(status: MessageExecutionStatus): boolean {
+    return !this.isPositiveTerminal(status) && !this.isTerminalFailure(status) && status !== 'DELIVERY_UNKNOWN' && status !== 'REQUIRES_RECONCILIATION';
+  }
+
+  private isPositiveTerminal(status: MessageExecutionStatus): boolean {
+    return ['PROVIDER_ACCEPTED', 'DELIVERY_PENDING', 'DELIVERED', 'OPENED', 'REPLIED'].includes(status);
+  }
+
+  private isExpiredIdempotency(record: { expiresAt?: Date }): boolean {
+    return record.expiresAt !== undefined && record.expiresAt.getTime() <= Date.now();
+  }
+
+  private hasSubmissionAttempt(execution: OutreachMessageExecutionType): boolean {
+    return execution.attempts > 0 || execution.providerId !== undefined;
+  }
+
+  private advanceToDeliveryPending(
+    execution: OutreachMessageExecutionType,
+    providerMessageId: string | undefined,
+    internetMessageId: string | undefined,
+    correlationId: CorrelationId,
+    eventId: EventId,
+  ): void {
+    if (execution.status === 'APPROVED') {
+      execution.markSending(correlationId, eventId);
+    }
+    if (execution.status === 'SENDING') {
+      execution.markProviderAccepted(providerMessageId, internetMessageId, undefined, correlationId, eventId);
+    }
+    if (execution.status === 'PROVIDER_ACCEPTED') {
+      execution.markDeliveryPending(correlationId, eventId);
+    }
+  }
+
+  private async saveAuthoritative(
+    ctx: TenantContext,
+    execution: OutreachMessageExecutionType,
+    executionId: OutreachExecutionId,
+  ): Promise<OutreachMessageExecutionType> {
+    try {
+      await this.deps.executionRepository.save(ctx, execution);
+      return execution;
+    } catch (err) {
+      if (err instanceof ConcurrencyConflictError) {
+        const newer = await this.deps.executionRepository.load(ctx, executionId);
+        return newer ?? execution;
+      }
+      throw err;
+    }
+  }
+
+  private resultFromExecution(execution: OutreachMessageExecutionType | null, executionId: OutreachExecutionId): ExecuteSendResult {
+    if (!execution) {
+      return { status: 'FAILED', executionId, reason: 'Execution not found' };
+    }
+    if (this.isPositiveTerminal(execution.status)) {
+      return { status: 'COMPLETED', executionId };
+    }
+    if (execution.status === 'SENDING' || execution.status === 'APPROVED') {
+      return { status: 'FAILED', executionId, reason: execution.lastError ?? 'Delivery outcome unknown after prior attempt; reconciliation required' };
+    }
+    if (execution.status === 'REQUIRES_RECONCILIATION') {
+      return { status: 'FAILED', executionId, reason: 'Reconciliation required before retry' };
+    }
+    return { status: 'FAILED', executionId, reason: execution.lastError ?? `Execution is ${execution.status}` };
   }
 
   private makeSendIdempotencyKey(
