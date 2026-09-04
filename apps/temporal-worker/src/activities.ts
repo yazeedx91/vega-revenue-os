@@ -21,6 +21,7 @@ import type { TenantContext } from '@projectx/domain';
 import type { IWorkflowClient, WorkflowExecutionRef, WorkflowStartOptions, WorkflowStartResult } from '@projectx/infrastructure';
 import { NoOpTelemetry, PostgresAuditLog, PostgresClient } from '@projectx/infrastructure';
 import { Pool } from 'pg';
+import { randomUUID } from 'crypto';
 import type { CorrelationId, TenantId, ToolCallRequest, ToolCallResult } from '@projectx/shared';
 import { SpecialistImplementationRegistry } from '@projectx/specialist-agents';
 import { asCorrelationId, asEventId, asIdempotencyKey } from '@projectx/shared';
@@ -58,10 +59,11 @@ import { LLMRouter, ProviderRegistry, OpenAIProvider, AnthropicProvider } from '
 import { EnvironmentSecretsProvider } from '@projectx/infrastructure';
 import { StubMissionPlanner } from './stubs';
 
-let counter = 0;
+// Execution ids and idempotency keys must be globally unique across worker
+// restarts. A process-local counter collides with rows persisted by a prior
+// worker (e.g. ai_runtime.llm_invocations PK on llm_call_id), so use a UUID.
 function generateId(): string {
-  counter += 1;
-  return `id-${counter}`;
+  return randomUUID();
 }
 
 class NoOpWorkflowClient implements IWorkflowClient {
