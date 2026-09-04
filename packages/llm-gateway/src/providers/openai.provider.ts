@@ -80,6 +80,7 @@ export class OpenAIProvider implements ILLMProvider {
         'TIMEOUT',
         true,
         err,
+        true,
       );
     }
 
@@ -95,6 +96,8 @@ export class OpenAIProvider implements ILLMProvider {
         this.providerId,
         code,
         retryable,
+        undefined,
+        true,
       );
     }
 
@@ -120,6 +123,9 @@ export class OpenAIProvider implements ILLMProvider {
           this.providerId,
           'MALFORMED_STRUCTURED_OUTPUT',
           false,
+          undefined,
+          true,
+          { inputTokens, outputTokens, totalTokens },
         );
       }
     }

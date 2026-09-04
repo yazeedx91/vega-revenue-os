@@ -18,6 +18,7 @@ export * from './infrastructure/in-memory-notification-adapter';
 export * from './infrastructure/in-memory-compensation-adapter';
 export * from './infrastructure/in-memory-idempotency-store';
 export * from './infrastructure/approval-verification-adapter';
+export * from './infrastructure/postgres-execution-approval-binding';
 export * from './workflow/mission-execution-engine';
 export * from './workflow/mission-mapper';
 export * from './workflow/mission-workflow.interfaces';

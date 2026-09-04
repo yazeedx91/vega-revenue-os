@@ -1,7 +1,7 @@
 import type { TenantContext } from '@projectx/domain';
 import { ensureSameTenant } from '@projectx/domain';
 import type { ExecutionBudget, ModelUsage, PromptContext } from '@projectx/shared';
-import { LLMRouter } from '@projectx/llm-gateway';
+import { LLMRouter, LLMProviderError } from '@projectx/llm-gateway';
 import type { LLMProviderRequest, LLMProviderResult } from '@projectx/llm-gateway';
 import type { IReasoningEngine, ReasoningOutput, ReasoningRequest, ProposedAction } from './reasoning.interface';
 import type { IReasoningArtifactRepository, ReasoningArtifact } from './reasoning-artifact.interface';
@@ -51,9 +51,47 @@ export class ProductionReasoningEngine implements IReasoningEngine {
 
     let llmRequest = baseRequest;
     let lastValidation: { valid: boolean; schemaViolations?: string[]; policyViolations?: string[] } | undefined;
-    for (let attempt = 0; attempt <= (this.deps.maxRetries ?? 2); attempt += 1) {
-      const result = await this.deps.llmRouter.invoke(llmRequest);
+    let accumulatedCostUsd = 0;
+    let accumulatedTokens = 0;
+    let stoppedByBudget = false;
+    const maxAttempts = (this.deps.maxRetries ?? 2) + 1;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      // Repair budget pre-check: before spending on another call, verify the
+      // accumulated spend still leaves room within the execution budget. When
+      // the budget is already exhausted, fail safely without another call.
+      if (attempt > 0 && budget) {
+        const exhausted =
+          (budget.maxCostUsd !== undefined && accumulatedCostUsd >= budget.maxCostUsd) ||
+          (budget.maxTokens !== undefined && accumulatedTokens >= budget.maxTokens);
+        if (exhausted) {
+          stoppedByBudget = true;
+          break;
+        }
+      }
+
+      // Deterministic per-call identity: each repair invoke is a distinct,
+      // stable logical call (provider fallbacks within it share the call id).
+      llmRequest = {
+        ...llmRequest,
+        llmCallId: `${request.idempotencyKey as unknown as string}:reasoning:${attempt}`,
+      };
+
+      let result: LLMProviderResult;
+      try {
+        result = await this.deps.llmRouter.invoke(llmRequest);
+      } catch (err) {
+        // Budget exhaustion surfaced by the router's conservative ledger must
+        // fail safely (no further repair calls) rather than propagate.
+        if (err instanceof LLMProviderError && err.code === 'BUDGET_EXHAUSTED') {
+          stoppedByBudget = true;
+          break;
+        }
+        throw err;
+      }
       const raw = this.extractRaw(result);
+      accumulatedCostUsd += result.costUsd;
+      accumulatedTokens += result.totalTokens;
 
       const validation = await this.outputValidator.validate(ctx, {
         execution: request.execution,
@@ -98,8 +136,10 @@ export class ProductionReasoningEngine implements IReasoningEngine {
     };
 
     const fallback: ReasoningOutput = {
-      rationale: `Model output failed structured validation after ${(this.deps.maxRetries ?? 2) + 1} attempts: ${lastValidation?.schemaViolations?.join('; ') ?? 'unknown'}`,
-      conclusion: 'invalid_structured_output',
+      rationale: stoppedByBudget
+        ? 'Reasoning repair stopped: execution budget exhausted before a valid structured output was produced.'
+        : `Model output failed structured validation after ${maxAttempts} attempts: ${lastValidation?.schemaViolations?.join('; ') ?? 'unknown'}`,
+      conclusion: stoppedByBudget ? 'budget_exhausted' : 'invalid_structured_output',
       confidence: 0,
       evidence: lastValidation?.schemaViolations ?? [],
       requiredApprovals: [],

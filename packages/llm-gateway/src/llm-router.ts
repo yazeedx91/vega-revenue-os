@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { LLMProviderError } from './llm-provider.interface';
 import type {
   LLMProviderRequest,
@@ -5,6 +6,7 @@ import type {
   ILLMProvider,
 } from './llm-provider.interface';
 import type { IProviderRegistry } from './provider-registry';
+import type { IExecutionBudgetLedger } from './execution-budget-ledger';
 
 export interface LLMModel {
   readonly modelId: string;
@@ -34,17 +36,41 @@ export interface LLMModelQuery {
   readonly modelId?: string;
 }
 
+export type LLMAttemptStatus = 'success' | 'failed' | 'blocked_budget';
+
+/**
+ * Auditable record for a single provider attempt within one logical LLM call.
+ * Emitted for every provider.invoke outcome (success and failure) so that
+ * failed attempts are recorded honestly rather than as fabricated zero usage.
+ */
 export interface LLMUsageEvent {
   readonly tenantId: string;
   readonly missionId: string;
   readonly executionId: string;
+  /** Stable identity of the logical call (one router.invoke). */
+  readonly llmCallId: string;
+  /** Provider-attempt index within the call (1 = primary, 2 = fallback, ...). */
+  readonly attempt: number;
   readonly providerId: string;
   readonly modelId: string;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-  readonly totalTokens: number;
-  readonly costUsd: number;
-  readonly latencyMs: number;
+  readonly providerRequestId?: string;
+  readonly capability: string;
+  readonly status: LLMAttemptStatus;
+  /** Whether an HTTP request was actually dispatched to the provider. */
+  readonly submitted: boolean;
+  /** Whether real usage figures are known for this attempt. */
+  readonly usageKnown: boolean;
+  readonly failureClassification?: string;
+  readonly retryable?: boolean;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly totalTokens?: number;
+  readonly costUsd?: number;
+  /** Conservative charge retained when a submitted attempt's usage is unknown. */
+  readonly estimatedCostUsd?: number;
+  readonly latencyMs?: number;
+  readonly startedAt?: Date;
+  readonly completedAt?: Date;
   readonly correlationId: string;
   readonly idempotencyKey?: string;
 }
@@ -76,12 +102,22 @@ export interface LLMRouterConfig {
   readonly maxAttempts?: number;
 }
 
+/**
+ * Realistic per-call token reservation bound. A single provider call rarely
+ * consumes its full maxTokens output ceiling; reserving the ceiling verbatim
+ * would let one attempt consume the entire execution budget and block all
+ * fallback. The reservation is reconciled to actual usage on success, so this
+ * bound only needs to keep unknown-usage failures conservative.
+ */
+const PER_CALL_TOKEN_ESTIMATE = 1024;
+
 export class LLMRouter {
   constructor(
     private readonly catalog: IModelCatalog,
     private readonly registry: IProviderRegistry,
     private readonly usageListener?: LLMUsageListener,
     private readonly config: LLMRouterConfig = {},
+    private readonly budgetLedger?: IExecutionBudgetLedger,
   ) {}
 
   async invoke(request: LLMProviderRequest): Promise<LLMProviderResult> {
@@ -108,8 +144,13 @@ export class LLMRouter {
     const maxAttempts = this.config.maxAttempts ?? ordered.length;
     const attempts = ordered.slice(0, maxAttempts);
     const errors: LLMProviderError[] = [];
+    const llmCallId = request.llmCallId ?? randomUUID();
+    let attemptIndex = 0;
+    let blockedByBudget = false;
 
     for (const model of attempts) {
+      attemptIndex += 1;
+      const attemptKey = `${llmCallId}:${attemptIndex}`;
       const provider = this.registry.get(model.providerId);
       if (!provider) {
         errors.push(
@@ -132,13 +173,110 @@ export class LLMRouter {
         costPerOutputTokenUsd: request.costPerOutputTokenUsd ?? model.costPerOutputTokenUsd,
       };
 
+      // Conservative budget reservation: before dispatching the provider call,
+      // reserve the estimated charge. If the accumulated charges plus this
+      // estimate exceed the execution budget, the attempt is blocked and no
+      // provider call is made. The token estimate is a realistic per-call bound
+      // (not the worst-case output cap): request.maxTokens is the per-call
+      // output ceiling, which the context assembler sets to the whole execution
+      // budget — reserving it verbatim would consume the entire budget on the
+      // first attempt and make cross-provider fallback impossible. The
+      // reservation is reconciled to actual usage on success, so a realistic
+      // bound still keeps unknown-usage failures conservative.
+      const estimatedCostUsd =
+        (providerRequest.costPerOutputTokenUsd ?? 0) * request.maxTokens;
+      const estimatedTokens = Math.min(request.maxTokens, PER_CALL_TOKEN_ESTIMATE);
+      const estimate = { costUsd: estimatedCostUsd, tokens: estimatedTokens };
+      if (this.budgetLedger && request.budget) {
+        const allowed = this.budgetLedger.tryReserve(
+          request.executionId,
+          attemptKey,
+          estimate,
+          request.budget,
+        );
+        if (!allowed) {
+          await this.emitAttempt(request, llmCallId, attemptIndex, model, {
+            status: 'blocked_budget',
+            submitted: false,
+            usageKnown: true,
+            failureClassification: 'BUDGET_EXHAUSTED',
+            retryable: false,
+            estimatedCostUsd,
+          });
+          errors.push(
+            new LLMProviderError(
+              `Budget exhausted before attempting provider ${model.providerId}`,
+              model.providerId,
+              'BUDGET_EXHAUSTED',
+              false,
+            ),
+          );
+          blockedByBudget = true;
+          break;
+        }
+      }
+
+      const attemptStartedAt = new Date();
       try {
         const result = await provider.invoke(providerRequest);
-        await this.emitUsage(request, result);
+        this.budgetLedger?.commitActual(request.executionId, attemptKey, {
+          costUsd: result.costUsd,
+          tokens: result.totalTokens,
+        });
+        await this.emitAttempt(request, llmCallId, attemptIndex, model, {
+          status: 'success',
+          submitted: true,
+          usageKnown: true,
+          providerRequestId: result.providerRequestId,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          totalTokens: result.totalTokens,
+          costUsd: result.costUsd,
+          latencyMs: result.latencyMs,
+          startedAt: attemptStartedAt,
+          completedAt: new Date(),
+        });
         return result;
       } catch (err) {
         if (err instanceof LLMProviderError) {
           errors.push(err);
+          const usage = err.usage;
+          const usageKnown = !err.submitted || usage !== undefined;
+          const costUsd = usage
+            ? usage.inputTokens * (providerRequest.costPerInputTokenUsd ?? 0) +
+              usage.outputTokens * (providerRequest.costPerOutputTokenUsd ?? 0)
+            : undefined;
+
+          if (!err.submitted) {
+            // No provider request was dispatched: release the reservation.
+            this.budgetLedger?.release(request.executionId, attemptKey);
+          } else if (usage) {
+            // Submitted and usage is known: reconcile to actual.
+            this.budgetLedger?.commitActual(request.executionId, attemptKey, {
+              costUsd: costUsd ?? 0,
+              tokens: usage.totalTokens,
+            });
+          } else {
+            // Submitted but usage unknown: retain the conservative estimate so
+            // a fallback cannot silently exceed the budget.
+            this.budgetLedger?.retain(request.executionId, attemptKey);
+          }
+
+          await this.emitAttempt(request, llmCallId, attemptIndex, model, {
+            status: 'failed',
+            submitted: err.submitted,
+            usageKnown,
+            failureClassification: err.code,
+            retryable: err.retryable,
+            inputTokens: usage?.inputTokens,
+            outputTokens: usage?.outputTokens,
+            totalTokens: usage?.totalTokens,
+            costUsd,
+            estimatedCostUsd: err.submitted && !usage ? estimatedCostUsd : undefined,
+            startedAt: attemptStartedAt,
+            completedAt: new Date(),
+          });
+
           if (!err.retryable) {
             throw err;
           }
@@ -147,6 +285,15 @@ export class LLMRouter {
         const unwrapped = err instanceof Error ? err : new Error(String(err));
         throw new LLMProviderError(unwrapped.message, 'router', 'ROUTER_UNEXPECTED_ERROR', false, unwrapped);
       }
+    }
+
+    if (blockedByBudget) {
+      throw new LLMProviderError(
+        `Execution budget exhausted for capability ${query.capability}`,
+        'router',
+        'BUDGET_EXHAUSTED',
+        false,
+      );
     }
 
     const message = errors.map((e) => `${e.providerId}: ${e.message}`).join('; ');
@@ -225,19 +372,52 @@ export class LLMRouter {
     };
   }
 
-  private async emitUsage(request: LLMProviderRequest, result: LLMProviderResult): Promise<void> {
+  private async emitAttempt(
+    request: LLMProviderRequest,
+    llmCallId: string,
+    attempt: number,
+    model: LLMModel,
+    detail: {
+      readonly status: LLMAttemptStatus;
+      readonly submitted: boolean;
+      readonly usageKnown: boolean;
+      readonly providerRequestId?: string;
+      readonly failureClassification?: string;
+      readonly retryable?: boolean;
+      readonly inputTokens?: number;
+      readonly outputTokens?: number;
+      readonly totalTokens?: number;
+      readonly costUsd?: number;
+      readonly estimatedCostUsd?: number;
+      readonly latencyMs?: number;
+      readonly startedAt?: Date;
+      readonly completedAt?: Date;
+    },
+  ): Promise<void> {
     if (!this.usageListener) return;
     await this.usageListener({
       tenantId: request.tenantId,
       missionId: request.missionId,
       executionId: request.executionId,
-      providerId: result.providerId,
-      modelId: result.modelId,
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-      totalTokens: result.totalTokens,
-      costUsd: result.costUsd,
-      latencyMs: result.latencyMs,
+      llmCallId,
+      attempt,
+      providerId: model.providerId,
+      modelId: model.modelId,
+      providerRequestId: detail.providerRequestId,
+      capability: request.capability,
+      status: detail.status,
+      submitted: detail.submitted,
+      usageKnown: detail.usageKnown,
+      failureClassification: detail.failureClassification,
+      retryable: detail.retryable,
+      inputTokens: detail.inputTokens,
+      outputTokens: detail.outputTokens,
+      totalTokens: detail.totalTokens,
+      costUsd: detail.costUsd,
+      estimatedCostUsd: detail.estimatedCostUsd,
+      latencyMs: detail.latencyMs,
+      startedAt: detail.startedAt,
+      completedAt: detail.completedAt,
       correlationId: request.correlationId,
       idempotencyKey: request.idempotencyKey,
     });

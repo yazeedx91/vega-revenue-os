@@ -25,6 +25,7 @@ import type { IToolClient } from '../tool-client/tool-client.interface';
 import type { DecisionOutput, DecisionRequest } from '../decision/decision.interface';
 import { ExecutionState, type ExecutionFailure, type FailureClassification } from '../execution-state/execution-state';
 import type { ICheckpointStore } from '../execution-state/checkpoint-store.interface';
+import type { IExecutionApprovalBinding } from './execution-approval-binding.interface';
 
 export interface AgentExecutorDeps {
   readonly agentRegistry: IAgentRegistry;
@@ -39,6 +40,12 @@ export interface AgentExecutorDeps {
   readonly outputValidator: IOutputValidator;
   readonly telemetry: ITelemetry;
   readonly checkpointStore: ICheckpointStore;
+  /**
+   * Optional read-only check for an existing valid approval bound to the
+   * execution. When policy returns REQUIRE_APPROVAL and a bound approval
+   * already exists, the requirement is satisfied and execution proceeds.
+   */
+  readonly approvalBinding?: IExecutionApprovalBinding;
 }
 
 export class AgentExecutor implements IAgentExecutor {
@@ -76,6 +83,65 @@ export class AgentExecutor implements IAgentExecutor {
       const policyDecision = await this.deps.telemetry.span('policy.evaluate', () =>
         this.deps.policyClient.evaluate(tenantCtx, request),
       );
+
+      // Governance ordering: a DENY or REQUIRE_APPROVAL policy outcome must
+      // short-circuit BEFORE any LLM invocation (context assembly, reasoning).
+      // This guarantees the "zero provider calls on governance denial" claim.
+      if (policyDecision.outcome === 'DENY') {
+        return this.fail(
+          state,
+          request.correlationId,
+          'POLICY_DENIED',
+          'Policy denied the execution before any model invocation',
+          false,
+          startedAt,
+          policyDecision,
+        );
+      }
+
+      // When a valid bound approval satisfies a REQUIRE_APPROVAL gate, the
+      // policy approval requirement is met for the whole execution — not just
+      // the pre-invocation gate. The decision engine re-derives a 'policy'
+      // approval requirement from policyDecision.outcome, so downstream we must
+      // present an effective ALLOW decision or a bound approval could never
+      // complete execution.
+      let effectivePolicyDecision = policyDecision;
+      // Provenance for a bound approval that satisfied a REQUIRE_APPROVAL gate.
+      // Recorded in the result so the authoritative approval evidence (which
+      // approval, that it validated) is retained alongside the original policy
+      // decision — the synthetic execution-local ALLOW is never persisted.
+      let approvalEvidence: import('./execution-approval-binding.interface').ExecutionApprovalEvidence | null = null;
+      if (policyDecision.outcome === 'REQUIRE_APPROVAL') {
+        // Check whether a valid approval is already bound to this execution.
+        // If so, the approval requirement is satisfied and execution proceeds.
+        const binding = {
+          executionId: request.executionId as unknown as string,
+          idempotencyKey: request.idempotencyKey as unknown as string,
+          actionType: policyDecision.action,
+        };
+        approvalEvidence = this.deps.approvalBinding?.resolveValidApproval
+          ? await this.deps.approvalBinding.resolveValidApproval(tenantCtx, binding)
+          : (await this.deps.approvalBinding?.hasValidApproval(tenantCtx, binding))
+            ? { approvalId: 'unknown', status: 'APPROVED', validation: 'valid' }
+            : null;
+
+        if (!approvalEvidence) {
+          state.transition('AWAITING_APPROVAL');
+          await this.saveCheckpoint(state);
+          return this.result(
+            state,
+            request.correlationId,
+            'AWAITING_APPROVAL',
+            'Policy requires approval before any model invocation',
+            startedAt,
+            policyDecision,
+            [],
+          );
+        }
+        // A valid bound approval exists: the policy approval requirement is
+        // satisfied, so downstream decision evaluation treats it as allowed.
+        effectivePolicyDecision = { ...policyDecision, outcome: 'ALLOW' };
+      }
 
       const promptContext = await this.deps.telemetry.span('context.assemble', () =>
         this.deps.contextAssembler.assemble(tenantCtx, request),
@@ -125,7 +191,7 @@ export class AgentExecutor implements IAgentExecutor {
         this.deps.decisionEngine.decide(tenantCtx, {
           execution: request,
           reasoning: reasoningOutput,
-          policyDecision,
+          policyDecision: effectivePolicyDecision,
           correlationId: request.correlationId,
           idempotencyKey: request.idempotencyKey,
           deadline: request.deadline,
@@ -220,6 +286,29 @@ export class AgentExecutor implements IAgentExecutor {
         );
       }
 
+      // Retain bound-approval provenance on the completed result: the original
+      // policy decision id and its REQUIRE_APPROVAL outcome, plus which approval
+      // satisfied the gate and that it validated. The synthetic execution-local
+      // ALLOW is never recorded.
+      if (approvalEvidence) {
+        return {
+          ...specialistResult,
+          outcome: {
+            ...specialistResult.outcome,
+            decisions: [
+              ...specialistResult.outcome.decisions,
+              {
+                policyDecisionId: policyDecision.decisionId,
+                outcome: policyDecision.outcome,
+                satisfiedByApprovalId: approvalEvidence.approvalId,
+                approvalStatus: approvalEvidence.status,
+                approvalValidation: approvalEvidence.validation,
+              },
+            ],
+          },
+        };
+      }
+
       return specialistResult;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -300,13 +389,27 @@ export class AgentExecutor implements IAgentExecutor {
     policyDecision: PolicyDecision,
     evidence: string[],
     modelUsage?: ModelUsage,
+    approvalEvidence?: import('./execution-approval-binding.interface').ExecutionApprovalEvidence | null,
   ): AIExecutionResult {
     const completedAt = new Date();
+    const decisions: unknown[] = [
+      { policyDecisionId: policyDecision.decisionId, outcome: policyDecision.outcome },
+    ];
+    // Retain bound-approval provenance: the original policy decision id and its
+    // REQUIRE_APPROVAL outcome, plus which approval satisfied the gate and that
+    // it validated. The synthetic execution-local ALLOW is never recorded.
+    if (approvalEvidence) {
+      decisions.push({
+        policyDecisionId: policyDecision.decisionId,
+        outcome: policyDecision.outcome,
+        satisfiedByApprovalId: approvalEvidence.approvalId,
+        approvalStatus: approvalEvidence.status,
+        approvalValidation: approvalEvidence.validation,
+      });
+    }
     const outcome: ExecutionOutcome = {
       summary,
-      decisions: [
-        { policyDecisionId: policyDecision.decisionId, outcome: policyDecision.outcome },
-      ],
+      decisions,
       actions: state.toolExecutionHistory.map((r) => ({
         toolCallId: r.toolCallId,
         status: r.status,

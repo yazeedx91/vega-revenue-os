@@ -4,6 +4,7 @@ export * from './agent-executor/agent-registry.interface';
 export * from './agent-executor/resolved-agent';
 export * from './agent-executor/agent-implementation.interface';
 export * from './agent-executor/agent-implementation-registry.interface';
+export * from './agent-executor/execution-approval-binding.interface';
 export * from './context-assembler/context-assembler.interface';
 export * from './context-assembler/context-assembler';
 export * from './llm-client/llm-client.interface';

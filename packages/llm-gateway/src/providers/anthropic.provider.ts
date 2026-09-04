@@ -87,6 +87,7 @@ export class AnthropicProvider implements ILLMProvider {
         'TIMEOUT',
         true,
         err,
+        true,
       );
     }
 
@@ -102,6 +103,8 @@ export class AnthropicProvider implements ILLMProvider {
         this.providerId,
         code,
         retryable,
+        undefined,
+        true,
       );
     }
 
@@ -127,6 +130,9 @@ export class AnthropicProvider implements ILLMProvider {
           this.providerId,
           'MALFORMED_STRUCTURED_OUTPUT',
           false,
+          undefined,
+          true,
+          { inputTokens, outputTokens, totalTokens },
         );
       }
     }
