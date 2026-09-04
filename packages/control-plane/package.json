@@ -15,6 +15,7 @@
     "@projectx/ai-runtime": "workspace:*",
     "@projectx/domain": "workspace:*",
     "@projectx/infrastructure": "workspace:*",
+    "@projectx/llm-gateway": "workspace:*",
     "@projectx/shared": "workspace:*",
     "@projectx/specialist-agents": "workspace:*"
   },

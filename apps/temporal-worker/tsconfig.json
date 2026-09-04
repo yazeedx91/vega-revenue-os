@@ -12,6 +12,7 @@
     { "path": "../../packages/specialist-agents" },
     { "path": "../../packages/domain" },
     { "path": "../../packages/infrastructure" },
+    { "path": "../../packages/llm-gateway" },
     { "path": "../../packages/shared" },
     { "path": "../../packages/ai-runtime" },
     { "path": "../../packages/control-plane" },

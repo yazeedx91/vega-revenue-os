@@ -14,6 +14,19 @@
 - **System agents seed** — `SystemAgentsSeed` lifecycle progression is idempotent and skips past ACTIVE if already active; `PostgresAgentRepository.saveVersion` no-ops for identical definitions.
 - **Regression gate** — `corepack pnpm -r typecheck` PASS, `corepack pnpm -r build` PASS, `corepack pnpm test` PASS with natural Jest exit, E2E 54/54 PASS with `--detectOpenHandles` PASS, `git grep` shows no skipped/`.only` tests; `apps/api` and `packages/shared` test scripts were corrected to use `--runInBand` to eliminate worker force-exit warnings.
 
+## Slice 5 Acceptance (Production LLM Runtime)
+
+| Requirement | Status | Evidence | Notes |
+|---|---|---|---|
+| Multi-provider LLM runtime | COMPLETE | `packages/llm-gateway` provides `ILLMProvider`, `ProviderRegistry`, `LLMRouter`, `OpenAIProvider`, and `AnthropicProvider`; `LLMRouter` performs capability/model-family routing, retry on retryable provider errors, and cross-provider fallback | OpenAI and Anthropic are the primary providers; provider readiness is fail-closed via `checkReadiness` |
+| Production reasoning engine | COMPLETE | `ProductionReasoningEngine` uses `LLMRouter`, `StructuredOutputValidator`, bounded retries, and persists safe reasoning artifacts via `IReasoningArtifactRepository` | Raw chain-of-thought is not persisted; artifacts store rationale/conclusion/confidence/evidence/proposedActions/modelUsage/provider metadata |
+| Structured output validation | COMPLETE | `StructuredOutputValidator` supports `OutputValidatorPolicy` with `SchemaDefinition` and per-request policy override | `REASONING_OUTPUT_POLICY` requires rationale/conclusion/confidence/evidence |
+| Governance and budget enforcement | COMPLETE | `AgentExecutor` computes remaining budget, passes it to reasoning, and records `modelUsage` with provider and latency | `ModelUsage` extended with `provider` and `latencyMs` |
+| Cost accounting and artifact persistence | COMPLETE | `PostgresInvocationAccounting` and `PostgresReasoningArtifactRepository` persist to `ai_runtime.llm_invocations` and `ai_runtime.reasoning_artifacts` | Migration `infra/database/migrations/019_slice5_llm_runtime.sql` adds both tables with RLS |
+| Control-plane model catalog | COMPLETE | `ControlPlaneModelCatalog` adapts `IModelRepository` to `IModelCatalog` for `LLMRouter` | Wired in `apps/temporal-worker/src/activities.ts` |
+| Cross-provider fallback | COMPLETE | `LLMRouter` falls back to the next eligible provider when the primary provider is not ready or fails | E2E coverage added in `tests/e2e/phase14/slice5-llm-runtime.spec.ts` |
+| Regression gate | PASS | `pnpm -r typecheck` PASS, `pnpm -r build` PASS, `pnpm -r test` PASS, `pnpm -r test -- --detectOpenHandles` PASS, no skipped tests found | `packages/llm-gateway` 23 tests pass; `packages/ai-runtime` 44 tests pass |
+
 ## Verification Artifacts
 
 - `packages/control-plane/src/domain.ts`: added `ImmutableAgentVersionConflict` error and `isMutableAgentLifecycle` guard.

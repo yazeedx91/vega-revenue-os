@@ -10,6 +10,7 @@
   "references": [
     { "path": "../domain" },
     { "path": "../infrastructure" },
+    { "path": "../llm-gateway" },
     { "path": "../shared" }
   ]
 }

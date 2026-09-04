@@ -32,6 +32,9 @@ import {
   PolicyAwareDecisionEngine,
   ToolExecutor,
   StructuredOutputValidator,
+  ProductionReasoningEngine,
+  PostgresReasoningArtifactRepository,
+  PostgresInvocationAccounting,
   type IReasoningEngine,
   type ReasoningRequest,
   type ReasoningOutput,
@@ -39,6 +42,7 @@ import {
 import {
   ControlPlaneAgentRegistry,
   ControlPlanePolicyClient,
+  ControlPlaneModelCatalog,
   PolicyEvaluationService,
   PostgresAgentRepository,
   PostgresAuditSink,
@@ -49,6 +53,8 @@ import {
   PostgresPolicyRepository,
   type PostgresControlPlaneRepositoryConfig,
 } from '@projectx/control-plane';
+import { LLMRouter, ProviderRegistry, OpenAIProvider, AnthropicProvider } from '@projectx/llm-gateway';
+import { EnvironmentSecretsProvider } from '@projectx/infrastructure';
 import { StubMissionPlanner } from './stubs';
 
 let counter = 0;
@@ -108,6 +114,63 @@ const autonomyRepository = new PostgresAutonomyRepository(repoConfig);
 const modelRepository = new PostgresModelRepository(repoConfig);
 const emergencyStopProvider = new PostgresEmergencyStopProvider(repoConfig);
 
+const modelCatalog = new ControlPlaneModelCatalog(modelRepository);
+
+const secretsProvider = new EnvironmentSecretsProvider();
+const providerRegistry = new ProviderRegistry();
+providerRegistry.register(
+  new OpenAIProvider({
+    providerId: 'openai',
+    baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com',
+    secretName: process.env.OPENAI_SECRET_NAME ?? 'openai/api-key',
+    secretProvider: secretsProvider,
+    defaultModelId: process.env.OPENAI_DEFAULT_MODEL ?? 'gpt-4o-mini',
+  }),
+);
+providerRegistry.register(
+  new AnthropicProvider({
+    providerId: 'anthropic',
+    baseUrl: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com',
+    secretName: process.env.ANTHROPIC_SECRET_NAME ?? 'anthropic/api-key',
+    secretProvider: secretsProvider,
+    defaultModelId: process.env.ANTHROPIC_DEFAULT_MODEL ?? 'claude-3-haiku-20240307',
+  }),
+);
+
+const reasoningArtifactRepository = new PostgresReasoningArtifactRepository(postgresClient);
+const invocationAccounting = new PostgresInvocationAccounting(postgresClient);
+
+const llmRouter = new LLMRouter(
+  modelCatalog,
+  providerRegistry,
+  async (event) => {
+    await invocationAccounting.record(
+      {
+        tenantId: event.tenantId as unknown as TenantId,
+        correlationId: event.correlationId as CorrelationId,
+      },
+      {
+        tenantId: event.tenantId as unknown as TenantId,
+        missionId: event.missionId,
+        executionId: event.executionId,
+        providerId: event.providerId,
+        modelId: event.modelId,
+        providerRequestId: 'unknown',
+        capability: event.correlationId,
+        inputTokens: event.inputTokens,
+        outputTokens: event.outputTokens,
+        totalTokens: event.totalTokens,
+        costUsd: event.costUsd,
+        latencyMs: event.latencyMs,
+        correlationId: event.correlationId,
+        idempotencyKey: event.idempotencyKey,
+        recordedAt: new Date(),
+      },
+    );
+  },
+  { defaultCapability: 'chat' },
+);
+
 const policyEvaluationService = new PolicyEvaluationService({
   emergencyStopProvider,
   policyRepository,
@@ -123,18 +186,10 @@ const controlPlanePolicyClient = new ControlPlanePolicyClient({
   policyEvaluationService,
 });
 
-class DeterministicReasoningEngine implements IReasoningEngine {
-  async reason(_ctx: TenantContext, _request: ReasoningRequest): Promise<ReasoningOutput> {
-    return {
-      rationale: 'Slice 3 deterministic reasoning: Control Plane policy will govern the execution.',
-      conclusion: 'proceed',
-      confidence: 0.9,
-      evidence: [],
-      requiredApprovals: [],
-      proposedActions: [],
-    };
-  }
-}
+const productionReasoningEngine = new ProductionReasoningEngine({
+  llmRouter,
+  artifactRepository: reasoningArtifactRepository,
+});
 
 class NoopToolClient {
   async call(request: ToolCallRequest): Promise<ToolCallResult> {
@@ -151,7 +206,7 @@ const agentExecutor = new AgentExecutor({
   }),
   memoryRetriever: new InMemoryMemoryRetriever(),
   knowledgeRetriever: new InMemoryKnowledgeRetriever(),
-  reasoningEngine: new DeterministicReasoningEngine(),
+  reasoningEngine: productionReasoningEngine,
   decisionEngine: new PolicyAwareDecisionEngine(),
   toolClient: new ToolExecutor(new NoopToolClient() as any, new NoOpTelemetry(), { maxRetries: 0, baseDelayMs: 10 }),
   outputValidator: new StructuredOutputValidator({

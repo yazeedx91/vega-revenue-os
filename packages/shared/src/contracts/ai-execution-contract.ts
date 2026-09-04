@@ -78,4 +78,6 @@ export interface ModelUsage {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  provider?: string;
+  latencyMs?: number;
 }

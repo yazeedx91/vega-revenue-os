@@ -7,4 +7,12 @@ export interface PromptContext {
   modelFamily?: string;
   maxTokens?: number;
   timeoutMs?: number;
+  tenantId?: string;
+  missionId?: string;
+  executionId?: string;
+  agentId?: string;
+  agentVersion?: string;
+  capability?: string;
+  correlationId?: string;
+  idempotencyKey?: string;
 }

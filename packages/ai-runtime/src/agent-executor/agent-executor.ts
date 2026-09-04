@@ -6,6 +6,7 @@ import type {
   AIExecutionResult,
   AIExecutionStatus,
   CorrelationId,
+  ExecutionBudget,
   ExecutionOutcome,
   ModelUsage,
 } from '@projectx/shared';
@@ -80,6 +81,17 @@ export class AgentExecutor implements IAgentExecutor {
         this.deps.contextAssembler.assemble(tenantCtx, request),
       );
 
+      if (!state.isWithinBudget(request.budget)) {
+        throw new Error('budget exhausted before reasoning');
+      }
+
+      const remainingBudget: ExecutionBudget = {
+        maxTokens: request.budget.maxTokens - state.budgetConsumed.maxTokens,
+        maxCostUsd: request.budget.maxCostUsd - state.budgetConsumed.maxCostUsd,
+        maxDurationSeconds: request.budget.maxDurationSeconds - state.budgetConsumed.maxDurationSeconds,
+      };
+
+      const reasoningStartedAt = new Date();
       const reasoningOutput = await this.deps.telemetry.span('reasoning', () =>
         this.deps.reasoningEngine.reason(tenantCtx, {
           execution: request,
@@ -88,8 +100,26 @@ export class AgentExecutor implements IAgentExecutor {
           correlationId: request.correlationId,
           idempotencyKey: request.idempotencyKey,
           deadline: request.deadline,
+          remainingBudget,
         } as ReasoningRequest),
       );
+      const reasoningCompletedAt = new Date();
+      const reasoningDurationSeconds = (reasoningCompletedAt.getTime() - reasoningStartedAt.getTime()) / 1000;
+      const reasoningUsage = reasoningOutput.modelUsage ?? { model: 'unknown', inputTokens: 0, outputTokens: 0, costUsd: 0 };
+      state.consumeBudget(reasoningUsage.inputTokens + reasoningUsage.outputTokens, reasoningUsage.costUsd, reasoningDurationSeconds);
+
+      if (!state.isWithinBudget(request.budget)) {
+        return this.fail(
+          state,
+          request.correlationId,
+          'BUDGET_EXHAUSTED',
+          'Reasoning consumed the remaining execution budget',
+          false,
+          startedAt,
+          policyDecision,
+          reasoningUsage,
+        );
+      }
 
       const decisionOutput = await this.deps.telemetry.span('decision', () =>
         this.deps.decisionEngine.decide(tenantCtx, {
@@ -111,6 +141,7 @@ export class AgentExecutor implements IAgentExecutor {
           false,
           startedAt,
           policyDecision,
+          reasoningOutput.modelUsage,
         );
       }
 
@@ -125,6 +156,7 @@ export class AgentExecutor implements IAgentExecutor {
           startedAt,
           policyDecision,
           reasoningOutput.evidence,
+          reasoningOutput.modelUsage,
         );
       }
 
@@ -165,6 +197,28 @@ export class AgentExecutor implements IAgentExecutor {
 
       state.transition(specialistResult.status);
       await this.saveCheckpoint(state);
+
+      const specialistUsage = specialistResult.modelUsage;
+      if (specialistUsage) {
+        state.consumeBudget(
+          specialistUsage.inputTokens + specialistUsage.outputTokens,
+          specialistUsage.costUsd,
+          (specialistResult.completedAt.getTime() - specialistResult.startedAt.getTime()) / 1000,
+        );
+      }
+
+      if (!state.isWithinBudget(request.budget)) {
+        return this.fail(
+          state,
+          request.correlationId,
+          'BUDGET_EXHAUSTED',
+          'Specialist execution consumed the remaining budget',
+          false,
+          startedAt,
+          policyDecision,
+          specialistUsage ?? reasoningOutput.modelUsage,
+        );
+      }
 
       return specialistResult;
     } catch (err) {
@@ -245,6 +299,7 @@ export class AgentExecutor implements IAgentExecutor {
     startedAt: Date,
     policyDecision: PolicyDecision,
     evidence: string[],
+    modelUsage?: ModelUsage,
   ): AIExecutionResult {
     const completedAt = new Date();
     const outcome: ExecutionOutcome = {
@@ -258,7 +313,7 @@ export class AgentExecutor implements IAgentExecutor {
       })),
       evidence,
     };
-    const modelUsage: ModelUsage = {
+    const usage: ModelUsage = modelUsage ?? {
       model: 'unknown',
       inputTokens: state.budgetConsumed.maxTokens,
       outputTokens: 0,
@@ -271,7 +326,7 @@ export class AgentExecutor implements IAgentExecutor {
       missionId: state.missionId,
       status,
       outcome,
-      modelUsage,
+      modelUsage: usage,
       startedAt,
       completedAt,
       correlationId,
@@ -287,6 +342,7 @@ export class AgentExecutor implements IAgentExecutor {
     retryable: boolean,
     startedAt: Date,
     policyDecision: PolicyDecision,
+    modelUsage?: ModelUsage,
   ): AIExecutionResult {
     const failure: ExecutionFailure = {
       code: classification,
@@ -304,6 +360,7 @@ export class AgentExecutor implements IAgentExecutor {
       startedAt,
       policyDecision,
       [],
+      modelUsage,
     );
   }
 }

@@ -2,6 +2,7 @@ import type { TenantContext } from '@projectx/domain';
 import type {
   AIExecutionRequest,
   CorrelationId,
+  ExecutionBudget,
   IdempotencyKey,
   ModelUsage,
   PromptContext,
@@ -22,6 +23,8 @@ export interface ReasoningRequest {
   idempotencyKey?: IdempotencyKey;
   deadline?: Date;
   abortSignal?: AbortSignal;
+  /** Remaining budget after any prior execution steps. */
+  remainingBudget?: ExecutionBudget;
 }
 
 export interface ProposedAction {
@@ -41,5 +44,7 @@ export interface ReasoningOutput {
   evidence: string[];
   requiredApprovals?: string[];
   proposedActions?: ProposedAction[];
+  /** Safe reasoning artifact fields. Raw chain-of-thought is never persisted here. */
+  assumptions?: string[];
   modelUsage?: ModelUsage;
 }

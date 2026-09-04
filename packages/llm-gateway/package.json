@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@projectx/infrastructure": "workspace:*",
     "@projectx/shared": "workspace:*"
   },
   "devDependencies": {

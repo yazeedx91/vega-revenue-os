@@ -11,7 +11,7 @@ export abstract class BaseSpecialist implements IAgentImplementation {
     const startedAt = runtime.startedAt;
     const completedAt = new Date();
     const outcome = await this.executeCore(request, runtime);
-    return this.buildResult(request, startedAt, completedAt, outcome);
+    return this.buildResult(request, startedAt, completedAt, outcome, runtime);
   }
 
   protected abstract executeCore(
@@ -33,8 +33,10 @@ export abstract class BaseSpecialist implements IAgentImplementation {
     startedAt: Date,
     completedAt: Date,
     outcome: ExecutionOutcome,
+    runtime: AgentImplementationRuntime,
   ): AIExecutionResult {
-    const modelUsage: ModelUsage = {
+    const reasoningUsage = runtime.reasoningOutput?.modelUsage;
+    const modelUsage: ModelUsage = reasoningUsage ?? {
       model: 'slice-4-deterministic',
       inputTokens: 0,
       outputTokens: 0,

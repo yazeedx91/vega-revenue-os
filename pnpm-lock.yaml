@@ -283,6 +283,9 @@ importers:
       '@projectx/infrastructure':
         specifier: workspace:*
         version: link:../../packages/infrastructure
+      '@projectx/llm-gateway':
+        specifier: workspace:*
+        version: link:../../packages/llm-gateway
       '@projectx/mission-orchestrator':
         specifier: workspace:*
         version: link:../../packages/mission-orchestrator
@@ -341,6 +344,9 @@ importers:
       '@projectx/infrastructure':
         specifier: workspace:*
         version: link:../infrastructure
+      '@projectx/llm-gateway':
+        specifier: workspace:*
+        version: link:../llm-gateway
       '@projectx/shared':
         specifier: workspace:*
         version: link:../shared
@@ -385,6 +391,9 @@ importers:
       '@projectx/infrastructure':
         specifier: workspace:*
         version: link:../infrastructure
+      '@projectx/llm-gateway':
+        specifier: workspace:*
+        version: link:../llm-gateway
       '@projectx/shared':
         specifier: workspace:*
         version: link:../shared
@@ -565,6 +574,9 @@ importers:
 
   packages/llm-gateway:
     dependencies:
+      '@projectx/infrastructure':
+        specifier: workspace:*
+        version: link:../infrastructure
       '@projectx/shared':
         specifier: workspace:*
         version: link:../shared

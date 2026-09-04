@@ -10,18 +10,17 @@ import {
   InMemoryCheckpointStore,
   InMemoryKnowledgeRetriever,
   InMemoryMemoryRetriever,
-  LLMBasedReasoningEngine,
-  LLMRouter,
   PolicyAwareDecisionEngine,
   StructuredOutputValidator,
   ToolExecutor,
   FakeAgentRegistry,
-  FakeLLMProvider,
   FakePolicyClient,
   FakeToolGateway,
   NoOpTelemetry,
   FakeImplementationRegistry,
 } from '@projectx/ai-runtime';
+import type { IReasoningEngine, ReasoningOutput, ReasoningRequest } from '@projectx/ai-runtime';
+import type { TenantContext } from '@projectx/domain';
 import type { OutputValidatorPolicy } from '@projectx/ai-runtime';
 import { baseExecution, activeAgent, tenantId, otherTenantId } from './fixtures';
 
@@ -30,31 +29,25 @@ function future(): Date {
 }
 
 function reasoningResponse(
-  proposedActions: unknown[],
+  proposedActions: ReasoningOutput['proposedActions'],
   conclusion = 'proceed',
-): {
-  content: string;
-  model: string;
-  provider: string;
-  tokensInput: number;
-  tokensOutput: number;
-  costUsd: number;
-} {
+): ReasoningOutput {
   return {
-    content: JSON.stringify({
-      rationale: 'Target looks qualified based on public data.',
-      conclusion,
-      confidence: 0.9,
-      evidence: ['company size matches ICP'],
-      proposedActions,
-      modelUsage: { model: 'fake', provider: 'fake', inputTokens: 10, outputTokens: 20, costUsd: 0.01 },
-    }),
-    model: 'fake',
-    provider: 'fake',
-    tokensInput: 10,
-    tokensOutput: 20,
-    costUsd: 0.01,
+    rationale: 'Target looks qualified based on public data.',
+    conclusion,
+    confidence: 0.9,
+    evidence: ['company size matches ICP'],
+    proposedActions,
+    modelUsage: { model: 'fake', provider: 'fake', inputTokens: 10, outputTokens: 20, costUsd: 0.01 },
   };
+}
+
+class FakeReasoningEngine implements IReasoningEngine {
+  constructor(private readonly output: ReasoningOutput) {}
+
+  async reason(_ctx: TenantContext, _request: ReasoningRequest): Promise<ReasoningOutput> {
+    return this.output;
+  }
 }
 
 function successToolResult(): ToolCallResult {
@@ -124,12 +117,7 @@ function makeExecutor(options: {
       riskCategory: 'MEDIUM' as const,
     },
   ];
-  const llm = new LLMRouter(
-    [new FakeLLMProvider('fake', ['fake'], () => options.llmResponse ?? reasoningResponse(actions))],
-    new NoOpTelemetry(),
-    { defaultModelFamily: 'fake', defaultMaxTokens: 100, defaultTimeoutMs: 5000 },
-  );
-  const reasoningEngine = new LLMBasedReasoningEngine(llm);
+  const reasoningEngine = new FakeReasoningEngine(options.llmResponse ?? reasoningResponse(actions));
   const decisionEngine = new PolicyAwareDecisionEngine();
 
   const results = options.toolResults ?? [successToolResult()];

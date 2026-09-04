@@ -1,60 +1,70 @@
 import {
-  LLMBasedReasoningEngine,
-  LLMRouter,
+  InMemoryReasoningArtifactRepository,
   PolicyAwareDecisionEngine,
-  FakeLLMProvider,
-  NoOpTelemetry,
+  ProductionReasoningEngine,
 } from '@projectx/ai-runtime';
-import { asCorrelationId, asIdempotencyKey, asTenantId } from '@projectx/shared';
+import { asCorrelationId, asTenantId } from '@projectx/shared';
 import { baseExecution, tenantId } from './fixtures';
 
 const otherTenantId = asTenantId('tenant-2');
 
-describe('LLMBasedReasoningEngine', () => {
+const reasoningRequest = () => ({
+  execution: baseExecution(),
+  promptContext: {
+    systemPromptVersion: '1',
+    userMessage: 'Task: research',
+    toolsAvailable: ['web_search'],
+  },
+  observations: [],
+  correlationId: asCorrelationId('corr-1'),
+});
+
+const providerResult = (overrides: Record<string, unknown> = {}) => ({
+  providerId: 'fake',
+  modelId: 'fake',
+  providerRequestId: 'req-1',
+  content: '',
+  structured: {
+    rationale: 'Public data supports qualification.',
+    conclusion: 'proceed',
+    confidence: 0.85,
+    evidence: ['size match'],
+    proposedActions: [
+      {
+        actionId: 'a-1',
+        capability: 'research',
+        toolId: 'web_search',
+        toolVersion: '1.0.0',
+        input: { query: 'x' },
+        rationale: 'Search',
+        riskCategory: 'MEDIUM',
+      },
+    ],
+  },
+  inputTokens: 5,
+  outputTokens: 15,
+  totalTokens: 20,
+  costUsd: 0.01,
+  latencyMs: 10,
+  finishReason: 'stop',
+  startedAt: new Date(),
+  completedAt: new Date(),
+  ...overrides,
+});
+
+const makeEngine = (result: unknown) =>
+  new ProductionReasoningEngine({
+    llmRouter: { invoke: async () => result } as any,
+    artifactRepository: new InMemoryReasoningArtifactRepository(),
+  });
+
+describe('ProductionReasoningEngine', () => {
   it('parses structured JSON reasoning output', async () => {
-    const provider = new FakeLLMProvider('fake', ['fake'], () => ({
-      content: JSON.stringify({
-        rationale: 'Public data supports qualification.',
-        conclusion: 'proceed',
-        confidence: 0.85,
-        evidence: ['size match'],
-        proposedActions: [
-          {
-            actionId: 'a-1',
-            capability: 'research',
-            toolId: 'web_search',
-            toolVersion: '1.0.0',
-            input: { query: 'x' },
-            rationale: 'Search',
-            riskCategory: 'MEDIUM',
-          },
-        ],
-      }),
-      model: 'fake',
-      provider: 'fake',
-      tokensInput: 5,
-      tokensOutput: 15,
-      costUsd: 0.01,
-    }));
-    const llm = new LLMRouter(
-      [provider],
-      new NoOpTelemetry(),
-      { defaultModelFamily: 'fake', defaultMaxTokens: 100, defaultTimeoutMs: 5000 },
-    );
-    const engine = new LLMBasedReasoningEngine(llm);
+    const engine = makeEngine(providerResult());
 
     const result = await engine.reason(
       { tenantId, correlationId: asCorrelationId('corr-1') },
-      {
-        execution: baseExecution(),
-        promptContext: {
-          systemPromptVersion: '1',
-          userMessage: 'Task: research',
-          toolsAvailable: ['web_search'],
-        },
-        observations: [],
-        correlationId: asCorrelationId('corr-1'),
-      },
+      reasoningRequest(),
     );
 
     expect(result.conclusion).toBe('proceed');
@@ -63,69 +73,27 @@ describe('LLMBasedReasoningEngine', () => {
     expect(result.modelUsage).toBeDefined();
   });
 
-  it('falls back to free text when JSON is invalid', async () => {
-    const provider = new FakeLLMProvider('fake', ['fake'], () => ({
-      content: 'I think we should proceed.',
-      model: 'fake',
-      provider: 'fake',
-      tokensInput: 5,
-      tokensOutput: 5,
-      costUsd: 0.001,
-    }));
-    const llm = new LLMRouter(
-      [provider],
-      new NoOpTelemetry(),
-      { defaultModelFamily: 'fake', defaultMaxTokens: 100, defaultTimeoutMs: 5000 },
+  it('returns invalid_structured_output when model output is not valid JSON', async () => {
+    const engine = makeEngine(
+      providerResult({ structured: undefined, content: 'I think we should proceed.' }),
     );
-    const engine = new LLMBasedReasoningEngine(llm);
 
     const result = await engine.reason(
       { tenantId, correlationId: asCorrelationId('corr-1') },
-      {
-        execution: baseExecution(),
-        promptContext: {
-          systemPromptVersion: '1',
-          userMessage: 'Task: research',
-          toolsAvailable: ['web_search'],
-        },
-        observations: [],
-        correlationId: asCorrelationId('corr-1'),
-      },
+      reasoningRequest(),
     );
 
-    expect(result.conclusion).toBe('parsed_from_free_text');
-    expect(result.confidence).toBe(0.5);
+    expect(result.conclusion).toBe('invalid_structured_output');
+    expect(result.confidence).toBe(0);
   });
 
   it('rejects cross-tenant reasoning requests', async () => {
-    const provider = new FakeLLMProvider('fake', ['fake'], () => ({
-      content: '{}',
-      model: 'fake',
-      provider: 'fake',
-      tokensInput: 0,
-      tokensOutput: 0,
-      costUsd: 0,
-    }));
-    const llm = new LLMRouter(
-      [provider],
-      new NoOpTelemetry(),
-      { defaultModelFamily: 'fake', defaultMaxTokens: 100, defaultTimeoutMs: 5000 },
-    );
-    const engine = new LLMBasedReasoningEngine(llm);
+    const engine = makeEngine(providerResult());
 
     await expect(
       engine.reason(
         { tenantId: otherTenantId, correlationId: asCorrelationId('corr-1') },
-        {
-          execution: baseExecution(),
-          promptContext: {
-            systemPromptVersion: '1',
-            userMessage: 'Task: research',
-            toolsAvailable: ['web_search'],
-          },
-          observations: [],
-          correlationId: asCorrelationId('corr-1'),
-        },
+        reasoningRequest(),
       ),
     ).rejects.toThrow();
   });
