@@ -1,4 +1,6 @@
 import { createConnection } from 'net';
+import type { AddressInfo } from 'net';
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http';
 import { randomUUID } from 'crypto';
 import { Pool } from 'pg';
 import { Connection, WorkflowClient } from '@temporalio/client';
@@ -41,6 +43,71 @@ const INITIAL_PLAN = {
   fallbackBranches: [],
 };
 
+// Slice 5 wired the real ProductionReasoningEngine into the shared worker, so a
+// mission now invokes a real LLM provider. Point the provider adapters at a
+// local HTTP mock so the reasoning step completes deterministically.
+const VALID_REASONING = JSON.stringify({
+  rationale: 'Slice 2 rationale.',
+  conclusion: 'Proceed with research task.',
+  confidence: 0.9,
+  evidence: ['evidence-1'],
+  requiredApprovals: [],
+  proposedActions: [],
+  assumptions: [],
+});
+
+class MockLLMServer {
+  private server!: Server;
+  public baseUrl = '';
+
+  async start(): Promise<void> {
+    this.server = createServer((req, res) => this.handle(req, res));
+    await new Promise<void>((resolve) => this.server.listen(0, '127.0.0.1', resolve));
+    const { port } = this.server.address() as AddressInfo;
+    this.baseUrl = `http://127.0.0.1:${port}`;
+  }
+
+  async stop(): Promise<void> {
+    if (!this.server) return;
+    await new Promise<void>((resolve) => this.server.close(() => resolve()));
+  }
+
+  private handle(req: IncomingMessage, res: ServerResponse): void {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      const url = req.url ?? '';
+      if (url.includes('/v1/chat/completions')) {
+        this.reply(res, 'openai');
+      } else if (url.includes('/v1/messages')) {
+        this.reply(res, 'anthropic');
+      } else {
+        res.writeHead(404).end('not found');
+      }
+    });
+  }
+
+  private reply(res: ServerResponse, provider: 'openai' | 'anthropic'): void {
+    const payload =
+      provider === 'openai'
+        ? {
+            id: `chatcmpl-${randomUUID()}`,
+            choices: [
+              { message: { role: 'assistant', content: VALID_REASONING }, finish_reason: 'stop' },
+            ],
+            usage: { prompt_tokens: 12, completion_tokens: 34, total_tokens: 46 },
+          }
+        : {
+            id: `msg-${randomUUID()}`,
+            content: [{ type: 'text', text: VALID_REASONING }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 12, output_tokens: 34 },
+          };
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(payload));
+  }
+}
+
 async function isReachable(address: string): Promise<boolean> {
   const [host, portStr] = address.split(':');
   const port = parseInt(portStr ?? '7233', 10);
@@ -80,8 +147,9 @@ describe('Slice 2 canonical mission E2E', () => {
   let nativeConnection: NativeConnection | undefined;
   let clientConnection: Connection | undefined;
   let client: WorkflowClient | undefined;
+  let mock: MockLLMServer | undefined;
   const address = getTemporalAddress();
-  const controlPlaneSeeds = { research: false, agent: false };
+  const controlPlaneSeeds = { research: false, agent: false, models: false };
 
   function buildService(taskQueue: string): MissionOrchestratorService {
     return new MissionOrchestratorService({
@@ -166,10 +234,43 @@ describe('Slice 2 canonical mission E2E', () => {
     );
     controlPlaneSeeds.agent = true;
 
+    // Models eligible for the 'reasoning' capability, routed to the real providers
+    // (which the test points at the local mock via *_BASE_URL env).
+    for (const m of [
+      { id: 'gpt-4o-mini', provider: 'openai', family: 'gpt', priority: 1 },
+      { id: 'claude-3-haiku-20240307', provider: 'anthropic', family: 'claude', priority: 2 },
+    ]) {
+      await adminPool.query(
+        `INSERT INTO control_plane.models
+           (model_id, provider, family, capabilities, latency_class, cost_metadata, health_metadata, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+         ON CONFLICT (model_id) DO UPDATE SET
+           provider = EXCLUDED.provider,
+           capabilities = EXCLUDED.capabilities,
+           health_metadata = EXCLUDED.health_metadata,
+           updated_at = NOW()`,
+        [
+          m.id,
+          m.provider,
+          m.family,
+          ['reasoning', 'chat'],
+          'background',
+          JSON.stringify({ costPerInputTokenUsd: 5e-7, costPerOutputTokenUsd: 1.5e-6 }),
+          JSON.stringify({ maxContextTokens: 128000, supportsStructuredOutput: true, lifecycle: 'ACTIVE', priority: m.priority }),
+        ],
+      );
+    }
+    controlPlaneSeeds.models = true;
+
     // Guard against a stale Slice 3 system-hard-deny fixture blocking this run.
     await adminPool.query(
       `DELETE FROM control_plane.policies
        WHERE policy_id = 'system-hard-deny' AND is_system = true AND scope = 'system' AND capability = 'research'`,
+    );
+    // Guard against any stale non-ALLOW system research policy blocking this run.
+    await adminPool.query(
+      `DELETE FROM control_plane.policies
+       WHERE is_system = true AND scope = 'system' AND capability = 'research' AND outcome <> 'ALLOW'`,
     );
   }
 
@@ -197,7 +298,16 @@ describe('Slice 2 canonical mission E2E', () => {
     }
 
     await runMigrations(getAdminDatabaseUrl());
+
+    // Start the mock and point the real provider adapters at it BEFORE the test
+    // imports activities.ts (which reads provider base URLs/secrets at import).
+    mock = new MockLLMServer();
+    await mock.start();
     process.env.DATABASE_URL = getAppDatabaseUrl();
+    process.env.OPENAI_BASE_URL = mock.baseUrl;
+    process.env.ANTHROPIC_BASE_URL = mock.baseUrl;
+    process.env.OPENAI_API_KEY = 'e2e-openai-key';
+    process.env.ANTHROPIC_API_KEY = 'e2e-anthropic-key';
 
     [appPool, adminPool] = await Promise.all([
       connectPostgres(getAppDatabaseUrl()),
@@ -220,6 +330,7 @@ describe('Slice 2 canonical mission E2E', () => {
   }, 30_000);
 
   afterAll(async () => {
+    if (mock) await mock.stop();
     if (adminPool) await cleanupControlPlaneFixtures(adminPool);
     await adminPool?.end();
     await appPool?.end();
