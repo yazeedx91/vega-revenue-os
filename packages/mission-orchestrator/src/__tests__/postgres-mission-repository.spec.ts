@@ -104,7 +104,7 @@ describe('PostgresMissionRepository', () => {
         territory: ['US'],
         channels: ['email'],
         budget: { maxAiCostUsd: 100 },
-        autonomyLevel: 0.5,
+        autonomyLevel: 1,
         constraints: {},
         successCriteria: { targetMeetings: 1 },
         deadline: new Date(Date.now() + 86_400_000),
