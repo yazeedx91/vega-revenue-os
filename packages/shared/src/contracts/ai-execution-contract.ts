@@ -64,7 +64,15 @@ export type AIExecutionStatus =
   | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED'
-  | 'TIMED_OUT';
+  | 'TIMED_OUT'
+  /**
+   * Execution/task operational state entered when a tool/provider outcome is
+   * `OUTCOME_UNKNOWN` (submitted but result not known). This is an
+   * execution-level state, NOT a tool result status — the tool layer only ever
+   * reports `OUTCOME_UNKNOWN`. Requires reconciliation before any new side
+   * effect; the idempotency claim is retained and no automatic retry occurs.
+   */
+  | 'REQUIRES_RECONCILIATION';
 
 export interface ExecutionOutcome {
   summary: string;

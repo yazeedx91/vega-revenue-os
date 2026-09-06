@@ -11,4 +11,5 @@ export * from './result/result';
 export * from './types/correlation';
 export * from './types/domain-ids';
 export * from './types/tenant-id';
+export * from './validation/strict-tool-schema-validator';
 export * from './workflow/workflow-id-factory';
