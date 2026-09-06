@@ -57,6 +57,7 @@ import {
 } from '@projectx/control-plane';
 import { LLMRouter, ProviderRegistry, OpenAIProvider, AnthropicProvider } from '@projectx/llm-gateway';
 import { EnvironmentSecretsProvider } from '@projectx/infrastructure';
+import { buildGovernedToolGateway } from './tool-gateway-wiring';
 import { StubMissionPlanner } from './stubs';
 
 // Execution ids and idempotency keys must be globally unique across worker
@@ -204,11 +205,23 @@ const productionReasoningEngine = new ProductionReasoningEngine({
   artifactRepository: reasoningArtifactRepository,
 });
 
-class NoopToolClient {
-  async call(request: ToolCallRequest): Promise<ToolCallResult> {
-    throw new Error(`No-op tool client cannot execute ${request.toolId}`);
-  }
-}
+// Governed tool execution path: ToolExecutor (zero retry) → ToolGateway (sole
+// retry + governance authority) → real providers. The HTTP provider egress
+// policy is privileged server config — restrictive by default (no arbitrary
+// egress unless an explicit allowlist/route is configured via env).
+const executionApprovalBinding = new PostgresExecutionApprovalBinding(postgresClient);
+const governedToolGateway = buildGovernedToolGateway({
+  pool,
+  policyClient: controlPlanePolicyClient,
+  approvalBinding: executionApprovalBinding,
+  secrets: secretsProvider,
+  httpEgress: {
+    allowedHosts: (process.env.TOOL_HTTP_EGRESS_ALLOWLIST ?? '').split(',').map((h) => h.trim()).filter(Boolean),
+    allowedSchemes: (process.env.TOOL_HTTP_EGRESS_SCHEMES ?? 'https').split(',').map((s) => s.trim()).filter(Boolean),
+    allowPrivateNetwork: process.env.TOOL_HTTP_EGRESS_ALLOW_PRIVATE === 'true',
+    allowRedirects: process.env.TOOL_HTTP_EGRESS_ALLOW_REDIRECTS === 'true',
+  },
+});
 
 const agentExecutor = new AgentExecutor({
   agentRegistry: controlPlaneAgentRegistry,
@@ -221,7 +234,7 @@ const agentExecutor = new AgentExecutor({
   knowledgeRetriever: new InMemoryKnowledgeRetriever(),
   reasoningEngine: productionReasoningEngine,
   decisionEngine: new PolicyAwareDecisionEngine(),
-  toolClient: new ToolExecutor(new NoopToolClient() as any, new NoOpTelemetry(), { maxRetries: 0, baseDelayMs: 10 }),
+  toolClient: new ToolExecutor(governedToolGateway, new NoOpTelemetry()),
   outputValidator: new StructuredOutputValidator({
     requiredFields: [],
     forbiddenValues: [],
@@ -231,7 +244,7 @@ const agentExecutor = new AgentExecutor({
   telemetry: new NoOpTelemetry(),
   checkpointStore: new InMemoryCheckpointStore(),
   implementationRegistry: new SpecialistImplementationRegistry(),
-  approvalBinding: new PostgresExecutionApprovalBinding(postgresClient),
+  approvalBinding: executionApprovalBinding,
 });
 
 const missionRepository = new PostgresMissionRepository({ pool });

@@ -298,6 +298,9 @@ importers:
       '@projectx/temporal-client':
         specifier: workspace:*
         version: link:../../packages/temporal-client
+      '@projectx/tool-gateway':
+        specifier: workspace:*
+        version: link:../../packages/tool-gateway
       '@temporalio/activity':
         specifier: ^1.11.0
         version: 1.22.0
@@ -735,6 +738,9 @@ importers:
       '@projectx/domain':
         specifier: workspace:*
         version: link:../domain
+      '@projectx/infrastructure':
+        specifier: workspace:*
+        version: link:../infrastructure
       '@projectx/shared':
         specifier: workspace:*
         version: link:../shared
