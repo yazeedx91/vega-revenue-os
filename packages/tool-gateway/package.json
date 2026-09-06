@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@projectx/domain": "workspace:*",
+    "@projectx/infrastructure": "workspace:*",
     "@projectx/shared": "workspace:*"
   },
   "devDependencies": {

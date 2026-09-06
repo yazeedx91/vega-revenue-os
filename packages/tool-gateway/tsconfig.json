@@ -8,5 +8,5 @@
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "**/*spec.ts"],
-  "references": [{ "path": "../domain" }, { "path": "../shared" }]
+  "references": [{ "path": "../domain" }, { "path": "../infrastructure" }, { "path": "../shared" }]
 }
