@@ -332,8 +332,10 @@ export class ToolGateway implements IToolGateway {
     if (attempt >= maxAttempts) return false;
     if (!outcome.retryable) return false;
     if (def.sideEffectClass === 'READ_ONLY') {
-      // A repeated read has no side effect; safe to retry ambiguous outcomes.
-      return outcome.submitted === false || outcome.resultKnown === false;
+      // A repeated read has no side effect: any retryable outcome is safe to
+      // retry — including a definitive retryable rejection (e.g. 503) and an
+      // ambiguous (resultKnown=false) outcome.
+      return true;
     }
     // Side-effecting: retry only when non-submission is positively known.
     return outcome.submitted === false;
