@@ -48,13 +48,10 @@ function successResult(): ToolCallResult {
   };
 }
 
-describe('ToolExecutor', () => {
+describe('ToolExecutor (zero retry authority — sole retry authority is ToolGateway)', () => {
   it('executes an authorized tool call', async () => {
     const gateway = { call: jest.fn().mockResolvedValue(successResult()) };
-    const executor = new ToolExecutor(gateway as any, new NoOpTelemetry(), {
-      maxRetries: 0,
-      baseDelayMs: 10,
-    });
+    const executor = new ToolExecutor(gateway as any, new NoOpTelemetry());
 
     const result = await executor.call(buildRequest(allowAuth()));
 
@@ -64,10 +61,7 @@ describe('ToolExecutor', () => {
 
   it('rejects a tool call that is not allowed', async () => {
     const gateway = { call: jest.fn().mockResolvedValue(successResult()) };
-    const executor = new ToolExecutor(gateway as any, new NoOpTelemetry(), {
-      maxRetries: 0,
-      baseDelayMs: 10,
-    });
+    const executor = new ToolExecutor(gateway as any, new NoOpTelemetry());
 
     await expect(
       executor.call(
@@ -84,10 +78,7 @@ describe('ToolExecutor', () => {
 
   it('rejects an expired authorization', async () => {
     const gateway = { call: jest.fn().mockResolvedValue(successResult()) };
-    const executor = new ToolExecutor(gateway as any, new NoOpTelemetry(), {
-      maxRetries: 0,
-      baseDelayMs: 10,
-    });
+    const executor = new ToolExecutor(gateway as any, new NoOpTelemetry());
 
     await expect(
       executor.call(
@@ -101,7 +92,7 @@ describe('ToolExecutor', () => {
     ).rejects.toThrow('expired');
   });
 
-  it('retries retryable provider errors up to maxRetries', async () => {
+  it('does NOT retry a retryable provider error (single delegation — gateway owns retry)', async () => {
     const retryable: ToolCallResult = {
       toolCallId: 'tc-1',
       status: 'PROVIDER_ERROR',
@@ -113,16 +104,14 @@ describe('ToolExecutor', () => {
       retryCount: 0,
       auditId: 'audit-1',
     };
-    const gateway = { call: jest.fn().mockResolvedValueOnce(retryable).mockResolvedValueOnce(successResult()) };
-    const executor = new ToolExecutor(gateway as any, new NoOpTelemetry(), {
-      maxRetries: 1,
-      baseDelayMs: 10,
-    });
+    const gateway = { call: jest.fn().mockResolvedValue(retryable) };
+    const executor = new ToolExecutor(gateway as any, new NoOpTelemetry());
 
     const result = await executor.call(buildRequest(allowAuth()));
 
-    expect(result.status).toBe('SUCCESS');
-    expect(gateway.call).toHaveBeenCalledTimes(2);
+    // Zero retry authority: exactly one delegation even for a retryable error.
+    expect(result.status).toBe('PROVIDER_ERROR');
+    expect(gateway.call).toHaveBeenCalledTimes(1);
   });
 
   it('does not retry non-retryable failures', async () => {
@@ -138,10 +127,7 @@ describe('ToolExecutor', () => {
       auditId: 'audit-1',
     };
     const gateway = { call: jest.fn().mockResolvedValue(failure) };
-    const executor = new ToolExecutor(gateway as any, new NoOpTelemetry(), {
-      maxRetries: 2,
-      baseDelayMs: 10,
-    });
+    const executor = new ToolExecutor(gateway as any, new NoOpTelemetry());
 
     const result = await executor.call(buildRequest(allowAuth()));
 

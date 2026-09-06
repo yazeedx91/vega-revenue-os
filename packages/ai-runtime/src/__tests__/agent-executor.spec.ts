@@ -127,10 +127,10 @@ function makeExecutor(options: {
     callCount += 1;
     return result;
   });
-  const toolExecutor = new ToolExecutor(gateway, new NoOpTelemetry(), {
-    maxRetries: options.maxToolRetries ?? 0,
-    baseDelayMs: 10,
-  });
+  // ToolExecutor has ZERO retry authority — the governed gateway owns all
+  // retry. The FakeToolGateway stands in for the gateway and returns the final
+  // (post-internal-retry) result for each delegated call.
+  const toolExecutor = new ToolExecutor(gateway, new NoOpTelemetry());
 
   const validatorPolicy: OutputValidatorPolicy = options.validatorPolicy ?? {
     requiredFields: [],
@@ -280,7 +280,7 @@ describe('AgentExecutor', () => {
     expect(result.outcome.summary).toContain('bad input');
   });
 
-  it('retries retryable tool failures and succeeds', async () => {
+  it('does not retry a retryable tool failure at the executor (gateway owns retry)', async () => {
     const retryable: ToolCallResult = {
       toolCallId: 'tc-1',
       status: 'PROVIDER_ERROR',
@@ -292,11 +292,14 @@ describe('AgentExecutor', () => {
       retryCount: 0,
       auditId: 'audit-1',
     };
-    const { executor } = makeExecutor({ toolResults: [retryable, successToolResult()], maxToolRetries: 1 });
+    // The executor delegates exactly once; a retryable provider error from the
+    // gateway surfaces as FAILED — the governed gateway is the sole retry
+    // authority and would have already exhausted its own attempts internally.
+    const { executor } = makeExecutor({ toolResults: [retryable] });
 
     const result = await executor.execute(baseExecution());
 
-    expect(result.status).toBe('COMPLETED');
+    expect(result.status).toBe('FAILED');
   });
 
   it('rejects outputs that violate policy', async () => {
