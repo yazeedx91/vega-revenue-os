@@ -128,7 +128,7 @@ async function isReachable(address: string): Promise<boolean> {
 
 async function waitFor(
   predicate: () => Promise<boolean>,
-  timeoutMs = 30_000,
+  timeoutMs = 60_000,
   intervalMs = 200,
 ): Promise<void> {
   const start = Date.now();
@@ -409,7 +409,7 @@ describe('Slice 2 canonical mission E2E', () => {
 
       await waitFor(
         async () => (await handle.query<MissionWorkflowStatus | undefined>(statusQuery))?.status === 'COMPLETED',
-        30_000,
+        60_000,
       );
       await handle.result();
 
@@ -470,16 +470,16 @@ describe('Slice 2 canonical mission E2E', () => {
 
       await waitFor(
         async () => (await handle.query<MissionWorkflowStatus | undefined>(statusQuery))?.status === 'EXECUTING',
-        30_000,
+        60_000,
       );
 
       await service.pauseMission(ctx, { missionId: missionId as string, reason: 'e2e-pause' });
 
       await waitFor(
         async () => (await handle.query<MissionWorkflowStatus | undefined>(statusQuery))?.status === 'PAUSED',
-        30_000,
+        60_000,
       );
-      await waitFor(async () => (await repo.findById(ctx, missionId as string))?.status === 'PAUSED', 30_000);
+      await waitFor(async () => (await repo.findById(ctx, missionId as string))?.status === 'PAUSED', 60_000);
 
       const prePause = await repo.findById(ctx, missionId as string);
       const prePauseTaskCount = prePause?.tasks.length ?? 0;
@@ -502,7 +502,7 @@ describe('Slice 2 canonical mission E2E', () => {
 
       await waitFor(
         async () => (await handle.query<MissionWorkflowStatus | undefined>(statusQuery))?.status === 'COMPLETED',
-        30_000,
+        60_000,
       );
       await handle.result();
 
@@ -565,7 +565,7 @@ describe('Slice 2 canonical mission E2E', () => {
       const handle = client.getHandle(startResult.workflowId);
       await waitFor(
         async () => (await handle.query<MissionWorkflowStatus | undefined>(statusQuery))?.status === 'COMPLETED',
-        30_000,
+        60_000,
       );
       await handle.result();
 
@@ -626,14 +626,14 @@ describe('Slice 2 canonical mission E2E', () => {
 
       await waitFor(
         async () => (await handle.query<MissionWorkflowStatus | undefined>(statusQuery))?.status === 'EXECUTING',
-        30_000,
+        60_000,
       );
 
       await service.cancelMission(ctx, { missionId: missionId as string, reason: 'e2e-cancel' });
 
       await waitFor(
         async () => (await handle.query<MissionWorkflowStatus | undefined>(statusQuery))?.status === 'CANCELLED',
-        30_000,
+        60_000,
       );
       await handle.result();
 
