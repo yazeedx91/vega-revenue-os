@@ -4,7 +4,10 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector is a hard production requirement (Slice 7 vector storage/ANN).
+    # pgvector/pgvector:pg16 bundles the extension on the same Postgres 16 major
+    # version, so the existing integration data volume remains compatible.
+    image: pgvector/pgvector:pg16
     container_name: projectx-integration-postgres
     environment:
       POSTGRES_USER: projectx
