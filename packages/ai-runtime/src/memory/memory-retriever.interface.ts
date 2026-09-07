@@ -23,4 +23,6 @@ export interface MemoryEntry {
   type: string;
   content: string;
   relevance: number;
+  /** Retrieval channel(s) that surfaced this entry, e.g. 'vector+fts'. */
+  channel?: string;
 }

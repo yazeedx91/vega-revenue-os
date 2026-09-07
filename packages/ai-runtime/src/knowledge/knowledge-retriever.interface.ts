@@ -22,4 +22,6 @@ export interface KnowledgeEntry {
   domain: string;
   content: string;
   relevance: number;
+  /** Retrieval channel(s) that surfaced this entry, e.g. 'vector+fts'. */
+  channel?: string;
 }

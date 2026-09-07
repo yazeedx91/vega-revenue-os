@@ -57,31 +57,42 @@ export class DurableKnowledgeRetriever implements IKnowledgeRetriever {
       }),
     ]);
 
-    const fused = this.fuse([vectorCandidates, ftsCandidates]);
+    const fused = this.fuse([
+      { name: 'vector', candidates: vectorCandidates },
+      { name: 'fts', candidates: ftsCandidates },
+    ]);
     return fused.slice(0, this.resultLimit).map((c) => ({
       knowledgeId: c.chunkId,
       domain: query.domain,
       content: c.content,
       relevance: c.score,
+      channel: c.channel,
     }));
   }
 
-  private fuse(channels: readonly RankedKnowledgeCandidate[][]): RankedKnowledgeCandidate[] {
-    const byKey = new Map<string, { candidate: RankedKnowledgeCandidate; score: number }>();
+  private fuse(
+    channels: readonly { name: string; candidates: readonly RankedKnowledgeCandidate[] }[],
+  ): (RankedKnowledgeCandidate & { channel: string })[] {
+    const byKey = new Map<string, { candidate: RankedKnowledgeCandidate; score: number; channels: Set<string> }>();
     for (const channel of channels) {
-      channel.forEach((candidate, index) => {
+      channel.candidates.forEach((candidate, index) => {
         const rank = index + 1;
         const contribution = 1 / (this.rrfK + rank);
         const existing = byKey.get(candidate.chunkId);
         if (existing) {
           existing.score += contribution;
+          existing.channels.add(channel.name);
         } else {
-          byKey.set(candidate.chunkId, { candidate, score: contribution });
+          byKey.set(candidate.chunkId, { candidate, score: contribution, channels: new Set([channel.name]) });
         }
       });
     }
     return Array.from(byKey.values())
-      .map(({ candidate, score }) => ({ ...candidate, score }))
+      .map(({ candidate, score, channels }) => ({
+        ...candidate,
+        score,
+        channel: Array.from(channels).sort().join('+'),
+      }))
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
         return a.chunkId < b.chunkId ? -1 : 1;

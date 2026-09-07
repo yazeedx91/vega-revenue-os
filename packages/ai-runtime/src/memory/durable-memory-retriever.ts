@@ -78,12 +78,16 @@ export class DurableMemoryRetriever implements IMemoryRetriever {
       limit: this.channelLimit,
     });
 
-    const fused = this.fuse([vectorCandidates, ftsCandidates]);
+    const fused = this.fuse([
+      { name: 'vector', candidates: vectorCandidates },
+      { name: 'fts', candidates: ftsCandidates },
+    ]);
     return fused.slice(0, this.resultLimit).map((c) => ({
       memoryId: c.memoryId,
       type: c.type,
       content: c.content,
       relevance: c.score,
+      channel: c.channel,
     }));
   }
 
@@ -91,25 +95,33 @@ export class DurableMemoryRetriever implements IMemoryRetriever {
    * Deterministic Reciprocal Rank Fusion. Each candidate's fused score is the
    * sum of 1/(k + rank) across the channels in which it appears. Ordering is a
    * pure function of the input ranks — ties break by memoryId then version so
-   * results are reproducible.
+   * results are reproducible. The set of contributing channels is recorded for
+   * provenance.
    */
-  private fuse(channels: readonly RankedMemoryCandidate[][]): RankedMemoryCandidate[] {
-    const byKey = new Map<string, { candidate: RankedMemoryCandidate; score: number }>();
+  private fuse(
+    channels: readonly { name: string; candidates: readonly RankedMemoryCandidate[] }[],
+  ): (RankedMemoryCandidate & { channel: string })[] {
+    const byKey = new Map<string, { candidate: RankedMemoryCandidate; score: number; channels: Set<string> }>();
     for (const channel of channels) {
-      channel.forEach((candidate, index) => {
+      channel.candidates.forEach((candidate, index) => {
         const rank = index + 1;
         const key = `${candidate.memoryId}#${candidate.version}`;
         const contribution = 1 / (this.rrfK + rank);
         const existing = byKey.get(key);
         if (existing) {
           existing.score += contribution;
+          existing.channels.add(channel.name);
         } else {
-          byKey.set(key, { candidate, score: contribution });
+          byKey.set(key, { candidate, score: contribution, channels: new Set([channel.name]) });
         }
       });
     }
     return Array.from(byKey.values())
-      .map(({ candidate, score }) => ({ ...candidate, score }))
+      .map(({ candidate, score, channels }) => ({
+        ...candidate,
+        score,
+        channel: Array.from(channels).sort().join('+'),
+      }))
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
         if (a.memoryId !== b.memoryId) return a.memoryId < b.memoryId ? -1 : 1;
