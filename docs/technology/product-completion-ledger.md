@@ -51,6 +51,28 @@
 | Pause/resume with no progression during pause | PASS | `tests/e2e/phase14/slice2-mission.spec.ts` 4/4 tests pass; `handleTaskResult` guards `mission.block` and allows `completeTask` to reconcile against a concurrently paused mission | No timeout increases or removed concurrency controls |
 | Full regression gate | PASS | `pnpm test` (41 unit/integration tests), `pnpm test:e2e` (54 E2E tests) all green | Includes `slice2-mission`, `slice3-control-plane`, `slice4-specialists`, and the rest of the phase 14 E2E suite |
 
+## Slice 7 Acceptance (Durable Memory R20, Durable Knowledge/Retrieval R21)
+
+| Requirement | Status | Evidence | Notes |
+|---|---|---|---|
+| R20 — Durable Memory | PENDING | 55/58 E2E acceptance tests pass in `tests/e2e/phase14/slice7-durable-memory-knowledge.spec.ts`; 3 todo (Temporal-dependent A36/A37, meta-test) | Pending freeze gate |
+| R21 — Durable Knowledge/Retrieval | PENDING | Same test file; knowledge ingestion, chunking, dedup, embedding, hybrid retrieval, provenance, and tenant isolation all verified | Pending freeze gate |
+
+### Slice 7 Acceptance Details
+
+- **Persistence (A1, A5)**: Memory and knowledge survive fresh-connection restart.
+- **Tenant isolation (A2, A3, A4, A28, A40, A41, A42)**: RLS on `memory.entries`, `knowledge.chunks`, `knowledge.sources` enforced via `projectx_app` role with `FORCE ROW LEVEL SECURITY`; cross-tenant writes blocked by `WITH CHECK`.
+- **Ingestion (A6, A7, A8, A9)**: Idempotency, content-hash dedup, chunk→source_version→source FK lineage.
+- **Embedding (A10, A24, A25, A26, A49, A50)**: Deterministic provider, profile pinning, exact vector-space matching, retryable/non-retryable error classification.
+- **Retrieval (A11, A12, A13, A53, A54, A55)**: pgvector ANN, PostgreSQL FTS, deterministic RRF hybrid fusion.
+- **Workspace & ACL (A14, A43, A44, A45, A46, A47, A48)**: Workspace membership authorization, workspace_id filtering, forged workspace rejection.
+- **Lifecycle (A15, A16, A17, A18, A19, A38)**: Source deletion/tombstone, chunk supersession, memory expiry, superseded version exclusion, conflicting version rejection, post-index tombstone.
+- **Security (A20, A21, A22, A23, A29, A35)**: Confidence/provenance persistence, raw CoT rejection, PII scrubbing, secret quarantine, global knowledge immutability, untrusted content marking.
+- **ContextAssembler (A30, A31, A32, A33, A34)**: Memory/knowledge provenance envelopes, budget enforcement, deduplication, audit provenance.
+- **Profile lifecycle (A27, A51, A52)**: Atomic profile promotion, non-ACTIVE profile rejection, cutover invariants.
+- **Temporal workflows (A36, A37)**: TODO — deferred until Temporal services available.
+- **Root cause fix**: `runMigrations()` poisons `process.env.DATABASE_URL` with the admin URL; all Slice 7 tests use `DEFAULT_APP_DATABASE_URL` directly to ensure `projectx_app` role (non-superuser, RLS-enforced).
+
 ## Known Deviations
 
 - Snyk code scan could not run locally because `SNYK_TOKEN` is not configured in this environment. The `security:snyk-code` script is available in `package.json` and should be executed in CI with a valid token.
