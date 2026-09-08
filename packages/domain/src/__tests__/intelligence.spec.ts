@@ -138,78 +138,71 @@ describe('Contact', () => {
   });
 });
 
+function leadProps(overrides: Record<string, unknown> = {}) {
+  return {
+    id: asLeadId('lead-1'),
+    tenantId: tenantId(),
+    workspaceId: 'ws-1',
+    accountId: asAccountId('acc-1'),
+    contactId: asContactId('con-1'),
+    icpProfileId: asICPProfileId('icp-1'),
+    icpProfileVersionId: asICPProfileVersionId('icp-1-v1'),
+    ...overrides,
+  };
+}
+
+function evalInput(overrides: Record<string, unknown> = {}) {
+  return {
+    scores: { icpMatch: 0.9, signalScore: 0.8, intentScore: 0.85, evidenceConfidence: 0.9, overall: 0.85 },
+    qualificationThreshold: 0.75,
+    reviewThreshold: 0.55,
+    hardFilterResults: [],
+    evidenceIds: [asEvidenceId('ev-1')],
+    signalIds: [],
+    normalizedFeatures: {},
+    snapshotSchemaVersion: '1.0',
+    scoringPolicyVersion: '1.0',
+    algorithmVersion: '1.0',
+    evaluatedAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
+  };
+}
+
 describe('Lead', () => {
   it('qualifies when score is above threshold', () => {
-    const lead = Lead.create(
-      {
-        id: asLeadId('lead-1'),
-        tenantId: tenantId(),
-        accountId: asAccountId('acc-1'),
-        contactId: asContactId('con-1'),
-        icpProfileId: asICPProfileId('icp-1'),
-      },
-      corr(),
-      evt(),
-    );
-    const scores = { icpMatch: 0.9, signalScore: 0.8, intentScore: 0.85, evidenceConfidence: 0.9, overall: 0.85 };
-    const result = lead.evaluate(scores, 0.75, 0.55, [asEvidenceId('ev-1')], 'strong fit', corr(), evt());
+    const lead = Lead.create(leadProps(), corr(), evt());
+    const result = lead.evaluate(evalInput() as any, corr(), evt());
     expect(result.success).toBe(true);
     expect(lead.status).toBe('QUALIFIED');
     expect(lead.domainEvents.some((e) => e.eventType === 'LeadQualified')).toBe(true);
   });
 
   it('requires review between thresholds', () => {
-    const lead = Lead.create(
-      {
-        id: asLeadId('lead-2'),
-        tenantId: tenantId(),
-        accountId: asAccountId('acc-1'),
-        contactId: asContactId('con-1'),
-        icpProfileId: asICPProfileId('icp-1'),
-      },
-      corr(),
-      evt(),
-    );
+    const lead = Lead.create(leadProps({ id: asLeadId('lead-2') }), corr(), evt());
     const scores = { icpMatch: 0.6, signalScore: 0.5, intentScore: 0.55, evidenceConfidence: 0.6, overall: 0.6 };
-    lead.evaluate(scores, 0.75, 0.55, [asEvidenceId('ev-1')], 'uncertain', corr(), evt());
+    lead.evaluate(evalInput({ scores }) as any, corr(), evt());
     expect(lead.status).toBe('NEEDS_REVIEW');
   });
 
   it('disqualifies below review threshold', () => {
-    const lead = Lead.create(
-      {
-        id: asLeadId('lead-3'),
-        tenantId: tenantId(),
-        accountId: asAccountId('acc-1'),
-        contactId: asContactId('con-1'),
-        icpProfileId: asICPProfileId('icp-1'),
-      },
-      corr(),
-      evt(),
-    );
+    const lead = Lead.create(leadProps({ id: asLeadId('lead-3') }), corr(), evt());
     const scores = { icpMatch: 0.3, signalScore: 0.2, intentScore: 0.25, evidenceConfidence: 0.3, overall: 0.3 };
-    lead.evaluate(scores, 0.75, 0.55, [], 'poor fit', corr(), evt());
+    lead.evaluate(evalInput({ scores, evidenceIds: [] }) as any, corr(), evt());
     expect(lead.status).toBe('NOT_QUALIFIED');
   });
 
   it('rejects invalid overall scores', () => {
-    const lead = Lead.create(
-      { id: asLeadId('lead-4'), tenantId: tenantId(), accountId: asAccountId('acc-1'), contactId: asContactId('con-1'), icpProfileId: asICPProfileId('icp-1') },
-      corr(),
-      evt(),
-    );
-    const result = lead.evaluate({ icpMatch: 0, signalScore: 0, intentScore: 0, evidenceConfidence: 0, overall: 1.5 }, 0.75, 0.55, [], '', corr(), evt());
+    const lead = Lead.create(leadProps({ id: asLeadId('lead-4') }), corr(), evt());
+    const scores = { icpMatch: 0, signalScore: 0, intentScore: 0, evidenceConfidence: 0, overall: 1.5 };
+    const result = lead.evaluate(evalInput({ scores, evidenceIds: [] }) as any, corr(), evt());
     expect(result.success).toBe(false);
     expect((result as any).error).toBeInstanceOf(LeadInvariantError);
   });
 
   it('approves a lead under review', () => {
-    const lead = Lead.create(
-      { id: asLeadId('lead-5'), tenantId: tenantId(), accountId: asAccountId('acc-1'), contactId: asContactId('con-1'), icpProfileId: asICPProfileId('icp-1') },
-      corr(),
-      evt(),
-    );
-    lead.evaluate({ icpMatch: 0.6, signalScore: 0.5, intentScore: 0.55, evidenceConfidence: 0.6, overall: 0.6 }, 0.75, 0.55, [], '', corr(), evt());
+    const lead = Lead.create(leadProps({ id: asLeadId('lead-5') }), corr(), evt());
+    const scores = { icpMatch: 0.6, signalScore: 0.5, intentScore: 0.55, evidenceConfidence: 0.6, overall: 0.6 };
+    lead.evaluate(evalInput({ scores, evidenceIds: [] }) as any, corr(), evt());
     lead.approve(corr(), evt());
     expect(lead.status).toBe('QUALIFIED');
   });

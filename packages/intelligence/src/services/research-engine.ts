@@ -367,31 +367,61 @@ export class ResearchEngine {
       {
         id: asLeadId(`lead-${account.id as string}-${contact.id as string}`),
         tenantId: ctx.tenantId,
+        workspaceId: account.workspaceId,
         missionId: undefined,
         accountId: account.id as AccountId,
         contactId: contact.id as ContactId,
         icpProfileId: profile.id,
+        icpProfileVersionId: profile.versionId,
       },
       this.deps.generateCorrelationId(),
       this.deps.generateEventId(),
     );
 
-    const reason = icpResult.passed
-      ? `ICP match ${scores.icpMatch}; signal ${scores.signalScore}; evidence ${scores.evidenceConfidence}`
-      : `Failed hard filters: ${icpResult.reasons.join(', ')}`;
+    const hardFilterResults = this.deriveHardFilterResults(icpResult);
 
     lead.evaluate(
-      scores,
-      profile.qualificationThreshold,
-      profile.reviewThreshold,
-      evidence.map((e) => e.evidenceId) as any,
-      reason,
+      {
+        scores,
+        qualificationThreshold: profile.qualificationThreshold,
+        reviewThreshold: profile.reviewThreshold,
+        hardFilterResults,
+        evidenceIds: evidence.map((e) => e.evidenceId) as any,
+        signalIds: [],
+        normalizedFeatures: {
+          industry: account.industry ?? null,
+          employeeCount: account.employeeCount ?? null,
+          territories: account.territories ?? [],
+        } as any,
+        snapshotSchemaVersion: '1.0',
+        scoringPolicyVersion: '1.0',
+        algorithmVersion: '1.0',
+        evaluatedAt: new Date(),
+      },
       this.deps.generateCorrelationId(),
       this.deps.generateEventId(),
     );
 
     await this.deps.leadRepository.save(ctx, lead);
     await this.publishEvents(lead);
+  }
+
+  private deriveHardFilterResults(icpResult: { passed: boolean; reasons: string[] }): Array<{ filter: 'INDUSTRY' | 'GEOGRAPHY' | 'COMPANY_SIZE' | 'TERRITORY' | 'EXCLUDED_INDUSTRY'; passed: boolean }> {
+    if (icpResult.passed) return [];
+    const results: Array<{ filter: 'INDUSTRY' | 'GEOGRAPHY' | 'COMPANY_SIZE' | 'TERRITORY' | 'EXCLUDED_INDUSTRY'; passed: boolean }> = [];
+    for (const reason of icpResult.reasons) {
+      const lower = reason.toLowerCase();
+      if (lower.includes('industry')) {
+        results.push({ filter: 'INDUSTRY', passed: false });
+      } else if (lower.includes('territory')) {
+        results.push({ filter: 'TERRITORY', passed: false });
+      } else if (lower.includes('employee')) {
+        results.push({ filter: 'COMPANY_SIZE', passed: false });
+      } else {
+        results.push({ filter: 'INDUSTRY', passed: false });
+      }
+    }
+    return results;
   }
 
   private async detectSignalsForAccount(ctx: TenantContext, account: Account): Promise<Array<{ relevance: number; confidence: number }>> {
