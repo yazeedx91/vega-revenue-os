@@ -1,7 +1,6 @@
 export interface ProtectedContactChannel {
   readonly fingerprint: string;
   readonly ciphertext?: string;
-  readonly keyVersion?: string;
 }
 
 export interface IContactChannelProtector {
