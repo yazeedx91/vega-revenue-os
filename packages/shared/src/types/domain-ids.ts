@@ -19,6 +19,7 @@ export type OutreachMessageId = string & { readonly __brand: 'OutreachMessageId'
 export type OutreachExecutionId = string & { readonly __brand: 'OutreachExecutionId' };
 export type ConversationId = string & { readonly __brand: 'ConversationId' };
 export type ReplyMessageId = string & { readonly __brand: 'ReplyMessageId' };
+export type SignalId = string & { readonly __brand: 'SignalId' };
 
 export function asMissionId(value: string): MissionId {
   return value as MissionId;
@@ -102,4 +103,8 @@ export function asConversationId(value: string): ConversationId {
 
 export function asReplyMessageId(value: string): ReplyMessageId {
   return value as ReplyMessageId;
+}
+
+export function asSignalId(value: string): SignalId {
+  return value as SignalId;
 }

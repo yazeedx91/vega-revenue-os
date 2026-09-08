@@ -14,6 +14,7 @@ export type {
   PolicyId,
   ReplyMessageId,
   ResearchRequestId,
+  SignalId,
   TaskId,
   UserId,
 } from '@projectx/shared';

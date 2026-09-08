@@ -1,6 +1,6 @@
 import type { CorrelationId, EventId, TenantId } from '@projectx/shared';
 import { DomainEvent } from '../events/domain-event';
-import type { AccountId, ContactId, EvidenceId, ICPProfileId, LeadId, ResearchRequestId } from '../types';
+import type { AccountId, ContactId, EvidenceId, ICPProfileId, LeadId, ResearchRequestId, SignalId } from '../types';
 
 export class ICPProfileCreated extends DomainEvent<{
   profileId: ICPProfileId;
@@ -188,6 +188,53 @@ export class BuyingSignalDetected extends DomainEvent<{
     payload: { signalId: string; accountId: AccountId; signalType: string; score: number },
   ) {
     super(eventId, 'BuyingSignalDetected', '1', new Date(), tenantId, correlationId, 'intelligence', payload);
+  }
+}
+
+export class SignalDetected extends DomainEvent<{
+  signalId: SignalId;
+  accountId: AccountId;
+  signalType: string;
+  confidence: number;
+  relevance: number;
+}> {
+  constructor(
+    eventId: EventId,
+    tenantId: TenantId,
+    correlationId: CorrelationId,
+    payload: { signalId: SignalId; accountId: AccountId; signalType: string; confidence: number; relevance: number },
+  ) {
+    super(eventId, 'SignalDetected', '1', new Date(), tenantId, correlationId, 'intelligence', payload);
+  }
+}
+
+export class SignalExpired extends DomainEvent<{
+  signalId: SignalId;
+  accountId: AccountId;
+  signalType: string;
+}> {
+  constructor(
+    eventId: EventId,
+    tenantId: TenantId,
+    correlationId: CorrelationId,
+    payload: { signalId: SignalId; accountId: AccountId; signalType: string },
+  ) {
+    super(eventId, 'SignalExpired', '1', new Date(), tenantId, correlationId, 'intelligence', payload);
+  }
+}
+
+export class SignalRetracted extends DomainEvent<{
+  signalId: SignalId;
+  accountId: AccountId;
+  reason: string;
+}> {
+  constructor(
+    eventId: EventId,
+    tenantId: TenantId,
+    correlationId: CorrelationId,
+    payload: { signalId: SignalId; accountId: AccountId; reason: string },
+  ) {
+    super(eventId, 'SignalRetracted', '1', new Date(), tenantId, correlationId, 'intelligence', payload);
   }
 }
 
