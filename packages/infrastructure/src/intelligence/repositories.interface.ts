@@ -4,9 +4,14 @@ import type { IRepository } from '@projectx/domain';
 
 export interface IICPProfileRepository extends IRepository<ICPProfile, string> {}
 
-export interface IAccountRepository extends IRepository<Account, string> {
-  findByMission(ctx: TenantContext, missionId: string): Promise<Account[]>;
-  findQualified(ctx: TenantContext): Promise<Account[]>;
+export interface AccountRepositoryContext extends TenantContext {
+  readonly workspaceId: string;
+}
+
+export interface IAccountRepository {
+  findById(ctx: AccountRepositoryContext, id: string): Promise<Account | null>;
+  save(ctx: AccountRepositoryContext, aggregate: Account): Promise<void>;
+  findQualified(ctx: AccountRepositoryContext): Promise<Account[]>;
 }
 
 export interface IContactRepository extends IRepository<Contact, string> {

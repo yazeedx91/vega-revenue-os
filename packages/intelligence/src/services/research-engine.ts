@@ -16,6 +16,7 @@ import { asAccountId, asContactId, asEvidenceId, asLeadId, type CorrelationId, t
 import type { JsonValue } from '@projectx/domain';
 import type { IEventBus } from '@projectx/infrastructure';
 import type {
+  AccountRepositoryContext,
   IAccountRepository,
   IContactRepository,
   IICPProfileRepository,
@@ -216,7 +217,8 @@ export class ResearchEngine {
         this.deps.generateEventId(),
       );
       account.markDuplicate(asAccountId(duplicate.accountId), 'Business system duplicate', this.deps.generateCorrelationId(), this.deps.generateEventId());
-      await this.deps.accountRepository.save(ctx, account);
+      const accountCtx: AccountRepositoryContext = { ...ctx, workspaceId };
+      await this.deps.accountRepository.save(accountCtx, account);
       await this.publishEvents(account);
       return account;
     }
@@ -247,7 +249,8 @@ export class ResearchEngine {
       this.deps.generateEventId(),
     );
     account.enrich({}, evidenceIds as any, this.deps.generateCorrelationId(), this.deps.generateEventId());
-    await this.deps.accountRepository.save(ctx, account);
+    const accountCtx: AccountRepositoryContext = { ...ctx, workspaceId };
+    await this.deps.accountRepository.save(accountCtx, account);
     await this.publishEvents(account);
     return account;
   }

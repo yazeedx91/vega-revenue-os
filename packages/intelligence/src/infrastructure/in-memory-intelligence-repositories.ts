@@ -1,5 +1,7 @@
 import type { Account, Contact, ICPProfile, Lead, ResearchEvidence, TenantContext } from '@projectx/domain';
+import { TenantIsolationError, AuthorizationError } from '@projectx/domain';
 import type {
+  AccountRepositoryContext,
   IAccountRepository,
   IContactRepository,
   IICPProfileRepository,
@@ -26,25 +28,31 @@ export class InMemoryICPProfileRepository implements IICPProfileRepository {
 export class InMemoryAccountRepository implements IAccountRepository {
   private readonly store = new Map<string, Account>();
 
-  private key(ctx: TenantContext, id: string): string {
-    return `${ctx.tenantId}:${id}`;
+  private key(ctx: AccountRepositoryContext, id: string): string {
+    return `${ctx.tenantId}:${ctx.workspaceId}:${id}`;
   }
 
-  async findById(ctx: TenantContext, id: string): Promise<Account | null> {
+  async findById(ctx: AccountRepositoryContext, id: string): Promise<Account | null> {
     return this.store.get(this.key(ctx, id)) ?? null;
   }
 
-  async save(ctx: TenantContext, account: Account): Promise<void> {
+  async save(ctx: AccountRepositoryContext, account: Account): Promise<void> {
+    if (ctx.tenantId !== account.tenantId) {
+      throw new TenantIsolationError(
+        `Account tenant ${account.tenantId} does not match context tenant ${ctx.tenantId}`,
+      );
+    }
+    if (ctx.workspaceId !== account.workspaceId) {
+      throw new AuthorizationError(
+        `Account workspace ${account.workspaceId} does not match authorized workspace ${ctx.workspaceId}`,
+      );
+    }
     this.store.set(this.key(ctx, account.id as string), account);
   }
 
-  async findByMission(_ctx: TenantContext, _missionId: string): Promise<Account[]> {
-    return [];
-  }
-
-  async findQualified(ctx: TenantContext): Promise<Account[]> {
+  async findQualified(ctx: AccountRepositoryContext): Promise<Account[]> {
     return Array.from(this.store.values()).filter(
-      (a) => a.tenantId === ctx.tenantId && a.status === 'QUALIFIED',
+      (a) => a.tenantId === ctx.tenantId && a.workspaceId === ctx.workspaceId && a.status === 'QUALIFIED',
     );
   }
 }

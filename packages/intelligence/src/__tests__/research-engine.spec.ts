@@ -196,7 +196,7 @@ describe('ResearchEngine', () => {
     }
     expect(result.leadsQualified).toBeGreaterThanOrEqual(1);
 
-    const account = await accountRepo.findById(ctx, 'acc-acme');
+    const account = await accountRepo.findById({ ...ctx, workspaceId: 'ws-1' }, 'acc-acme');
     expect(account?.status).toBe('ENRICHED');
 
     expect(eventBus.published.some((e) => e.eventType === 'LeadQualified')).toBe(true);
@@ -235,7 +235,7 @@ describe('ResearchEngine', () => {
 
     await engine.run(ctx, { missionId: 'mission-3', workspaceId: 'ws-1', icpProfileId: 'icp-1', objective: '', maxResults: 10 });
 
-    const account = await accountRepo.findById(ctx, 'acc-acme');
+    const account = await accountRepo.findById({ ...ctx, workspaceId: 'ws-1' }, 'acc-acme');
     expect(account).toBeTruthy();
   });
 });
