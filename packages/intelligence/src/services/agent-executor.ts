@@ -27,6 +27,7 @@ export class IntelligenceAgentExecutor implements IAgentExecutor {
           },
           {
             missionId: request.missionId,
+            workspaceId: (input.workspaceId as string) ?? '',
             icpProfileId: (input.icpId as string) ?? '',
             objective: (input.objective as string) ?? '',
             territories: (input.territory as string[]) ?? [],

@@ -65,6 +65,7 @@ describe('Account', () => {
       {
         id: asAccountId('acc-1'),
         tenantId: tenantId(),
+        workspaceId: 'ws-1',
         name: 'Acme Corp',
         domain: 'acme.com',
         industry: 'Manufacturing',
@@ -82,7 +83,7 @@ describe('Account', () => {
 
   it('marks a duplicate', () => {
     const account = Account.discover(
-      { id: asAccountId('acc-2'), tenantId: tenantId(), name: 'Acme' },
+      { id: asAccountId('acc-2'), tenantId: tenantId(), workspaceId: 'ws-1', name: 'Acme' },
       'provider',
       corr(),
       evt(),
@@ -94,7 +95,7 @@ describe('Account', () => {
 
   it('disqualifies an account', () => {
     const account = Account.discover(
-      { id: asAccountId('acc-3'), tenantId: tenantId(), name: 'Bad Fit' },
+      { id: asAccountId('acc-3'), tenantId: tenantId(), workspaceId: 'ws-1', name: 'Bad Fit' },
       'provider',
       corr(),
       evt(),

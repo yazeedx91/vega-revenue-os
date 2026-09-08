@@ -53,6 +53,7 @@ export interface ResearchEngineDependencies {
 
 export interface ResearchRunRequest {
   missionId: string;
+  workspaceId: string;
   icpProfileId: string;
   objective: string;
   territories?: string[];
@@ -89,7 +90,7 @@ export class ResearchEngine {
     };
 
     for (const candidate of accountCandidates) {
-      const account = await this.processAccount(ctx, provider, candidate);
+      const account = await this.processAccount(ctx, provider, candidate, request.workspaceId);
       if (!account || account.status === 'DUPLICATE' || account.status === 'DISQUALIFIED') {
         continue;
       }
@@ -156,6 +157,7 @@ export class ResearchEngine {
     ctx: TenantContext,
     provider: IResearchProvider,
     candidate: AccountCandidate,
+    workspaceId: string,
   ): Promise<Account | null> {
     const duplicate = await this.deps.businessSystemAdapter.findDuplicateAccount(ctx, candidate);
     if (duplicate) {
@@ -163,6 +165,7 @@ export class ResearchEngine {
         {
           id: asAccountId(candidate.providerAccountId),
           tenantId: ctx.tenantId,
+          workspaceId,
           name: candidate.name,
           domain: candidate.domain,
           industry: candidate.industry,
@@ -190,6 +193,7 @@ export class ResearchEngine {
       {
         id: asAccountId(candidate.providerAccountId),
         tenantId: ctx.tenantId,
+        workspaceId,
         name: candidate.name,
         domain: candidate.domain,
         industry: candidate.industry,
