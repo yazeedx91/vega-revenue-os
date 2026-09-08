@@ -111,6 +111,7 @@ describe('Contact', () => {
       {
         id: asContactId('con-1'),
         tenantId: tenantId(),
+        workspaceId: 'ws-1',
         accountId: asAccountId('acc-1'),
         name: 'Jane Doe',
       },
@@ -119,7 +120,7 @@ describe('Contact', () => {
       evt(),
     );
     expect(contact.status).toBe('DISCOVERED');
-    contact.enrich({ title: 'VP Sales', email: 'jane@acme.com' }, [asEvidenceId('ev-1')], corr(), evt());
+    contact.enrich({ title: 'VP Sales' }, [asEvidenceId('ev-1')], corr(), evt());
     expect(contact.status).toBe('ENRICHED');
     contact.validate(corr(), evt());
     expect(contact.status).toBe('VALIDATED');
@@ -127,7 +128,7 @@ describe('Contact', () => {
 
   it('suppresses a contact', () => {
     const contact = Contact.discover(
-      { id: asContactId('con-2'), tenantId: tenantId(), accountId: asAccountId('acc-1'), name: 'Spam' },
+      { id: asContactId('con-2'), tenantId: tenantId(), workspaceId: 'ws-1', accountId: asAccountId('acc-1'), name: 'Spam' },
       'provider',
       corr(),
       evt(),

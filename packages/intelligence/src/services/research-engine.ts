@@ -288,12 +288,12 @@ export class ResearchEngine {
         {
           id: asContactId(candidate.providerContactId),
           tenantId: ctx.tenantId,
+          workspaceId: account.workspaceId,
           accountId: account.id as AccountId,
           name: enriched.name,
           title: enriched.title,
           role: enriched.role,
           seniority: enriched.seniority,
-          email: enriched.email,
           channels: enriched.channels,
           evidenceReferences: [evidence.evidenceId as string] as any,
         },
