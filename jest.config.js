@@ -2,7 +2,7 @@
 module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>'],
-  testMatch: ['<rootDir>/packages/**/*.spec.ts', '<rootDir>/apps/**/*.spec.ts', '<rootDir>/scripts/**/*.spec.ts'],
+  testMatch: ['<rootDir>/packages/**/*.spec.ts', '<rootDir>/apps/**/*.spec.ts', '<rootDir>/scripts/**/*.spec.ts', '<rootDir>/tests/**/*.spec.ts'],
   testPathIgnorePatterns: ['<rootDir>/(packages|apps)/.*dist/.*', '<rootDir>/node_modules/'],
   moduleNameMapper: {
     '^@projectx/domain$': '<rootDir>/packages/domain/src',
