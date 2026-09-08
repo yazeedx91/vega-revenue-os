@@ -55,8 +55,8 @@
 
 | Requirement | Status | Evidence | Notes |
 |---|---|---|---|
-| R20 — Durable Memory | PENDING | 55/58 E2E acceptance tests pass in `tests/e2e/phase14/slice7-durable-memory-knowledge.spec.ts`; 3 todo (Temporal-dependent A36/A37, meta-test) | Pending freeze gate |
-| R21 — Durable Knowledge/Retrieval | PENDING | Same test file; knowledge ingestion, chunking, dedup, embedding, hybrid retrieval, provenance, and tenant isolation all verified | Pending freeze gate |
+| R20 — Durable Memory | COMPLETE CANDIDATE | 58/58 E2E acceptance tests pass in `tests/e2e/phase14/slice7-durable-memory-knowledge.spec.ts`; 0 todo, 0 skipped, 0 focused | Freeze gate passed |
+| R21 — Durable Knowledge/Retrieval | COMPLETE CANDIDATE | Same test file; knowledge ingestion, chunking, dedup, embedding, hybrid retrieval, provenance, and tenant isolation all verified | Freeze gate passed |
 
 ### Slice 7 Acceptance Details
 
@@ -70,7 +70,9 @@
 - **Security (A20, A21, A22, A23, A29, A35)**: Confidence/provenance persistence, raw CoT rejection, PII scrubbing, secret quarantine, global knowledge immutability, untrusted content marking.
 - **ContextAssembler (A30, A31, A32, A33, A34)**: Memory/knowledge provenance envelopes, budget enforcement, deduplication, audit provenance.
 - **Profile lifecycle (A27, A51, A52)**: Atomic profile promotion, non-ACTIVE profile rejection, cutover invariants.
-- **Temporal workflows (A36, A37)**: TODO — deferred until Temporal services available.
+- **Ingestion retry/idempotency (A36, A37)**: A36 proves failed ingestion is recorded as FAILED and retry completes; A37 proves content-hash dedup prevents duplicate chunks/embeddings on re-ingestion.
+- **Schema regression (A45)**: Slice 7 migrations preserve all earlier slice schemas (mission, control_plane, ai_runtime, tool_registry).
+- **Freeze gate**: typecheck PASS, build PASS, unit/integration 602 PASS, E2E 58/58 PASS (Slice 7), detectOpenHandles PASS, skip/focus scan clean, RLS/FORCE verified on 8 tables, projectx_app rolsuper=f rolbypassrls=f, cross-tenant isolation verified, workspace isolation verified, global knowledge immutability verified, pgvector 0.8.6 with active embedding profile, working tree clean.
 - **Root cause fix**: `runMigrations()` poisons `process.env.DATABASE_URL` with the admin URL; all Slice 7 tests use `DEFAULT_APP_DATABASE_URL` directly to ensure `projectx_app` role (non-superuser, RLS-enforced).
 
 ## Known Deviations
