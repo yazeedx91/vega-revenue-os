@@ -278,6 +278,22 @@ describe('Slice 8B1a — Account schema', () => {
         `INSERT INTO intelligence.accounts (account_id, tenant_id, workspace_id, name)
          VALUES ('acc-no-ws', 'tenant-s8', 'c0000000-0000-0000-0000-000000000099', 'No Such Workspace')`,
       ),
-    ).rejects.toThrow(/accounts_workspace_id_fkey|violates foreign key/i);
+    ).rejects.toThrow(/accounts_tenant_workspace_fk|accounts_workspace_id_fkey|violates foreign key/i);
+  });
+
+  it('composite FK rejects tenant/workspace ownership mismatch', async () => {
+    // Workspace b0000000-...-000000000003 belongs to tenant-s8b.
+    // Inserting an account as tenant-s8 with that workspace must fail
+    // at the composite FK level, even though the workspace genuinely exists
+    // and tenant-s8 is the active RLS tenant.
+    //
+    // We use the admin pool to bypass RLS for this insert so we can
+    // isolate the FK constraint from the RLS WITH CHECK rejection.
+    await expect(
+      adminPool.query(
+        `INSERT INTO intelligence.accounts (account_id, tenant_id, workspace_id, name)
+         VALUES ('acc-ownership-bad', 'tenant-s8', 'b0000000-0000-0000-0000-000000000003', 'Mismatched Ownership')`,
+      ),
+    ).rejects.toThrow(/accounts_tenant_workspace_fk|violates foreign key/i);
   });
 });
