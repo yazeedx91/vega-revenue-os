@@ -9,6 +9,7 @@ export type {
   EvidenceId,
   ExecutionId,
   ICPProfileId,
+  ICPProfileVersionId,
   LeadId,
   MissionId,
   PolicyId,

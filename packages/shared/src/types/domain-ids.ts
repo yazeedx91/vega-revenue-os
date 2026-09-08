@@ -20,6 +20,7 @@ export type OutreachExecutionId = string & { readonly __brand: 'OutreachExecutio
 export type ConversationId = string & { readonly __brand: 'ConversationId' };
 export type ReplyMessageId = string & { readonly __brand: 'ReplyMessageId' };
 export type SignalId = string & { readonly __brand: 'SignalId' };
+export type ICPProfileVersionId = string & { readonly __brand: 'ICPProfileVersionId' };
 
 export function asMissionId(value: string): MissionId {
   return value as MissionId;
@@ -107,4 +108,8 @@ export function asReplyMessageId(value: string): ReplyMessageId {
 
 export function asSignalId(value: string): SignalId {
   return value as SignalId;
+}
+
+export function asICPProfileVersionId(value: string): ICPProfileVersionId {
+  return value as ICPProfileVersionId;
 }

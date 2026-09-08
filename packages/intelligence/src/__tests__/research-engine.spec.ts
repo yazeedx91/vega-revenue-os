@@ -1,4 +1,4 @@
-import { asAccountId, asContactId, asCorrelationId, asEventId, asICPProfileId, asTenantId, type DomainEvent } from '@projectx/shared';
+import { asAccountId, asContactId, asCorrelationId, asEventId, asICPProfileId, asICPProfileVersionId, asTenantId, type DomainEvent } from '@projectx/shared';
 import { ICPProfile } from '@projectx/domain';
 import type { TenantContext } from '@projectx/domain';
 import type { IEventBus } from '@projectx/infrastructure';
@@ -146,6 +146,8 @@ async function seedProfile(icpRepo: InMemoryICPProfileRepository): Promise<void>
   const profile = ICPProfile.create(
     {
       id: asICPProfileId('icp-1'),
+      versionId: asICPProfileVersionId('icp-1-v1'),
+      version: 1,
       tenantId: asTenantId('tenant-1'),
       name: 'Manufacturing ICP',
       hardFilters: { industries: ['Manufacturing'], minEmployees: 50, territories: ['US'] },

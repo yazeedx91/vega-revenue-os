@@ -1,6 +1,6 @@
 import type { TenantContext } from '@projectx/domain';
 import { Actor, ICPProfile, Mission } from '@projectx/domain';
-import { asAccountId, asContactId, asCorrelationId, asEventId, asICPProfileId, asMissionId, asTenantId, asUserId } from '@projectx/shared';
+import { asAccountId, asContactId, asCorrelationId, asEventId, asICPProfileId, asICPProfileVersionId, asMissionId, asTenantId, asUserId } from '@projectx/shared';
 import type { IPlanner, PlanningRequest } from '@projectx/ai-runtime';
 import type { AgentContract, PlanContract } from '@projectx/shared';
 import type { IWorkflowClient } from '@projectx/infrastructure';
@@ -198,6 +198,8 @@ async function seedMissionAndProfile(ctx: TenantContext, deps: ReturnType<typeof
   const profile = ICPProfile.create(
     {
       id: asICPProfileId('icp-1'),
+      versionId: asICPProfileVersionId('icp-1-v1'),
+      version: 1,
       tenantId: ctx.tenantId,
       name: 'Manufacturing ICP',
       hardFilters: { industries: ['Manufacturing'], minEmployees: 50, territories: ['US'] },

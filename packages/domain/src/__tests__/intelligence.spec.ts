@@ -1,4 +1,4 @@
-import { asAccountId, asContactId, asCorrelationId, asEventId, asEvidenceId, asICPProfileId, asLeadId, asTenantId } from '@projectx/shared';
+import { asAccountId, asContactId, asCorrelationId, asEventId, asEvidenceId, asICPProfileId, asICPProfileVersionId, asLeadId, asTenantId } from '@projectx/shared';
 import {
   Account,
   Contact,
@@ -16,6 +16,8 @@ const evt = () => asEventId('evt-1');
 function defaultProfileProps() {
   return {
     id: asICPProfileId('icp-1'),
+    versionId: asICPProfileVersionId('icp-1-v1'),
+    version: 1,
     tenantId: tenantId(),
     name: 'Manufacturing ICP',
     hardFilters: {

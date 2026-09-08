@@ -1,32 +1,53 @@
 import type { CorrelationId, EventId, TenantId } from '@projectx/shared';
 import { DomainEvent } from '../events/domain-event';
-import type { AccountId, ContactId, EvidenceId, ICPProfileId, LeadId, ResearchRequestId, SignalId } from '../types';
+import type { AccountId, ContactId, EvidenceId, ICPProfileId, ICPProfileVersionId, LeadId, ResearchRequestId, SignalId } from '../types';
 
 export class ICPProfileCreated extends DomainEvent<{
   profileId: ICPProfileId;
+  versionId: ICPProfileVersionId;
+  version: number;
   name: string;
 }> {
   constructor(
     eventId: EventId,
     tenantId: TenantId,
     correlationId: CorrelationId,
-    payload: { profileId: ICPProfileId; name: string },
+    payload: { profileId: ICPProfileId; versionId: ICPProfileVersionId; version: number; name: string },
   ) {
-    super(eventId, 'ICPProfileCreated', '1', new Date(), tenantId, correlationId, 'intelligence', payload);
+    super(eventId, 'ICPProfileCreated', '2', new Date(), tenantId, correlationId, 'intelligence', payload);
   }
 }
 
 export class ICPProfileUpdated extends DomainEvent<{
   profileId: ICPProfileId;
+  versionId: ICPProfileVersionId;
+  version: number;
   name: string;
 }> {
   constructor(
     eventId: EventId,
     tenantId: TenantId,
     correlationId: CorrelationId,
-    payload: { profileId: ICPProfileId; name: string },
+    payload: { profileId: ICPProfileId; versionId: ICPProfileVersionId; version: number; name: string },
   ) {
-    super(eventId, 'ICPProfileUpdated', '1', new Date(), tenantId, correlationId, 'intelligence', payload);
+    super(eventId, 'ICPProfileUpdated', '2', new Date(), tenantId, correlationId, 'intelligence', payload);
+  }
+}
+
+export class ICPProfileVersionCreated extends DomainEvent<{
+  profileId: ICPProfileId;
+  versionId: ICPProfileVersionId;
+  version: number;
+  previousVersionId: ICPProfileVersionId;
+  name: string;
+}> {
+  constructor(
+    eventId: EventId,
+    tenantId: TenantId,
+    correlationId: CorrelationId,
+    payload: { profileId: ICPProfileId; versionId: ICPProfileVersionId; version: number; previousVersionId: ICPProfileVersionId; name: string },
+  ) {
+    super(eventId, 'ICPProfileVersionCreated', '1', new Date(), tenantId, correlationId, 'intelligence', payload);
   }
 }
 
