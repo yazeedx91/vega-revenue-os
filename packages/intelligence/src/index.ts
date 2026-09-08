@@ -12,6 +12,7 @@ export * from './infrastructure/in-memory-intelligence-cache';
 export * from './infrastructure/in-memory-intelligence-audit-log';
 export * from './infrastructure/stub-research-provider';
 export * from './infrastructure/dynamics-intelligence-adapter.stub';
+export * from './infrastructure/postgres-account-repository';
 
 export * from './services/scoring';
 export * from './services/research-engine';

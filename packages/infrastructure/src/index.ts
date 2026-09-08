@@ -10,6 +10,7 @@ export * from './persistence/postgres-client';
 export * from './persistence/postgres-repository';
 export * from './persistence/date-utils';
 export * from './persistence/concurrency-conflict.error';
+export * from './persistence/duplicate-record.error';
 export * from './testing/fake-pg-pool';
 export * from './testing/in-memory-audit-log';
 export * from './testing/in-memory-idempotency-store';
