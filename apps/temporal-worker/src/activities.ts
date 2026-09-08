@@ -37,10 +37,28 @@ import {
   ProductionReasoningEngine,
   PostgresReasoningArtifactRepository,
   PostgresInvocationAccounting,
+  PostgresMemoryRepository,
+  PostgresKnowledgeRepository,
+  PostgresEmbeddingProfileCatalog,
+  DeterministicEmbeddingProvider,
+  EmbeddingRouter,
+  EmbeddingProviderRegistry,
+  MemoryWritePolicyService,
+  KnowledgeIngestionService,
+  TrustedWorkspaceAuthorizer,
   type IReasoningEngine,
   type ReasoningRequest,
   type ReasoningOutput,
+  type IContentScrubber,
+  type ISecretDetector,
+  type IWorkspaceMembership,
 } from '@projectx/ai-runtime';
+import {
+  setKnowledgeIngestionService,
+  setMemoryWritePolicy,
+  ingestKnowledgeActivity,
+  consolidateMemoryActivity,
+} from './activities/memory-knowledge-activities';
 import {
   ControlPlaneAgentRegistry,
   ControlPlanePolicyClient,
@@ -284,6 +302,59 @@ const engine = new MissionExecutionEngine({
 
 setActivityEngineContext(engine);
 
+// ---------------------------------------------------------------------------
+// Slice 7 — Wire memory-knowledge activities with real Postgres-backed services
+// ---------------------------------------------------------------------------
+const memoryRepo = new PostgresMemoryRepository(postgresClient);
+const knowledgeRepo = new PostgresKnowledgeRepository(postgresClient);
+const embeddingProfileCatalog = new PostgresEmbeddingProfileCatalog(postgresClient);
+
+// Use the deterministic provider for local/offline development. In production
+// with real LLM keys, an OpenAIEmbeddingProvider would also be registered.
+const deterministicProvider = new DeterministicEmbeddingProvider('deterministic', [
+  {
+    modelId: process.env.EMBEDDING_MODEL_ID ?? 'det-model',
+    modelVersion: process.env.EMBEDDING_MODEL_VERSION ?? '1.0',
+    dimensions: Number(process.env.EMBEDDING_DIMENSIONS ?? 64),
+  },
+]);
+const embeddingProviderRegistry = new EmbeddingProviderRegistry();
+embeddingProviderRegistry.register(deterministicProvider);
+const embeddingRouter = new EmbeddingRouter(embeddingProfileCatalog, embeddingProviderRegistry);
+
+const noOpScrubber: IContentScrubber = { scrub: (s: string) => s };
+const noOpSecretDetector: ISecretDetector = {
+  containsSecret(input: string): boolean {
+    return /sk-[A-Za-z0-9]{20,}/.test(input) || /AKIA[A-Z0-9]{16}/.test(input);
+  },
+};
+
+// Workspace membership: in production this would be backed by the identity
+// service. For the Temporal worker we use a permissive stub that allows all
+// memberships, because the ingestion/consolidation activities are invoked by
+// trusted server-side workflows, not directly by end-user requests.
+const permissiveMembership: IWorkspaceMembership = {
+  async isMember() { return true; },
+};
+const wsAuthorizer = new TrustedWorkspaceAuthorizer(permissiveMembership);
+
+const memoryWritePolicy = new MemoryWritePolicyService(
+  memoryRepo,
+  embeddingRouter,
+  wsAuthorizer,
+  noOpScrubber,
+  noOpSecretDetector,
+);
+const knowledgeIngestionService = new KnowledgeIngestionService(
+  knowledgeRepo,
+  embeddingRouter,
+  noOpScrubber,
+  noOpSecretDetector,
+);
+
+setKnowledgeIngestionService(knowledgeIngestionService);
+setMemoryWritePolicy(memoryWritePolicy);
+
 export {
   planMissionActivity,
   replanMissionActivity,
@@ -292,6 +363,8 @@ export {
   handleTaskResultActivity,
   evaluateCompletionActivity,
   checkpointActivity,
+  ingestKnowledgeActivity,
+  consolidateMemoryActivity,
 };
 
 

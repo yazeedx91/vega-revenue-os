@@ -102,6 +102,18 @@ async function runMissionWorker(connection: NativeConnection): Promise<void> {
   await worker.run();
 }
 
+async function runKnowledgeWorker(connection: NativeConnection): Promise<void> {
+  const worker = await Worker.create({
+    connection,
+    workflowsPath: require.resolve('./workflows/knowledge-ingestion-workflow'),
+    taskQueue: 'knowledge-ingestion',
+    activities,
+  });
+  workers.push(worker);
+  console.log(JSON.stringify({ level: 'info', code: 'TEMPORAL_WORKER_LISTENING', taskQueue: 'knowledge-ingestion' }));
+  await worker.run();
+}
+
 async function runOutreachWorker(connection: NativeConnection): Promise<void> {
   const telemetry = createTelemetry();
   const adapters = await createDurableAdapters();
@@ -191,7 +203,7 @@ async function main(): Promise<void> {
     const connection = await connectWithRetry(address, temporalState);
     console.log(JSON.stringify({ level: 'info', code: 'TEMPORAL_CONNECTED', address }));
     try {
-      await Promise.all([runMissionWorker(connection), runOutreachWorker(connection)]);
+      await Promise.all([runMissionWorker(connection), runKnowledgeWorker(connection), runOutreachWorker(connection)]);
     } catch (err) {
       temporalState.connected = false;
       console.warn(

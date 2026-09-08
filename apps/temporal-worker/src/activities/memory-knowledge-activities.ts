@@ -1,3 +1,4 @@
+import { Context } from '@temporalio/activity';
 import type { TenantContext } from '@projectx/domain';
 import type { TenantId, CorrelationId } from '@projectx/shared';
 import type {
@@ -59,7 +60,14 @@ export async function ingestKnowledgeActivity(
   if (!ingestionService) {
     throw new Error('KnowledgeIngestionService not initialised; call setKnowledgeIngestionService at worker startup');
   }
-  return ingestionService.ingest(toContext(input), input.request);
+  const attempt = Context.current().info.attempt;
+  const request = {
+    ...input.request,
+    idempotencyKey: attempt > 1
+      ? `${input.request.idempotencyKey}:attempt-${attempt}`
+      : input.request.idempotencyKey,
+  };
+  return ingestionService.ingest(toContext(input), request);
 }
 
 export async function consolidateMemoryActivity(
