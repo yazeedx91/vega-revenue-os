@@ -3,6 +3,8 @@ import {
   Contact,
   Lead,
   ResearchEvidence,
+  ResearchRequest,
+  ResearchRun,
   type AccountId,
   type ContactId,
   type ICPProfile,
@@ -10,7 +12,8 @@ import {
   type ResearchEvidenceProps,
   type TenantContext,
 } from '@projectx/domain';
-import { asAccountId, asContactId, asEvidenceId, asLeadId, type CorrelationId, type EventId } from '@projectx/shared';
+import { asAccountId, asContactId, asEvidenceId, asLeadId, type CorrelationId, type EventId, type ResearchRequestId, type ResearchRunId } from '@projectx/shared';
+import type { JsonValue } from '@projectx/domain';
 import type { IEventBus } from '@projectx/infrastructure';
 import type {
   IAccountRepository,
@@ -49,6 +52,10 @@ export interface ResearchEngineDependencies {
   generateEventId: () => EventId;
   generateCorrelationId: () => CorrelationId;
   generateEvidenceId: () => string;
+  generateRequestId: () => ResearchRequestId;
+  generateRunId: () => ResearchRunId;
+  computeQueryHash: (input: { icpProfileId: string; territories?: string[]; maxResults?: number; objective: string }) => string;
+  computeEvidenceFingerprint: (input: { claimType: string; normalizedValue: JsonValue; source: string }) => string;
 }
 
 export interface ResearchRunRequest {
@@ -81,7 +88,29 @@ export class ResearchEngine {
       throw new Error('No research provider available');
     }
 
-    const accountCandidates = await this.discoverAccounts(ctx, provider, request, profile);
+    const queryHash = this.deps.computeQueryHash({
+      icpProfileId: request.icpProfileId,
+      territories: request.territories,
+      maxResults: request.maxResults,
+      objective: request.objective,
+    });
+    const now = new Date().toISOString();
+    const researchRequest = ResearchRequest.create({
+      id: this.deps.generateRequestId(),
+      tenantId: ctx.tenantId,
+      workspaceId: request.workspaceId,
+      missionId: request.missionId,
+      queryHash,
+      requestedAt: now,
+    });
+    const researchRun = ResearchRun.create({
+      id: this.deps.generateRunId(),
+      tenantId: ctx.tenantId,
+      workspaceId: request.workspaceId,
+      requestId: researchRequest.id,
+    });
+    researchRun.start(now);
+
     const summary: ResearchRunResult = {
       accountsDiscovered: 0,
       contactsDiscovered: 0,
@@ -89,25 +118,34 @@ export class ResearchEngine {
       leadsNeedReview: 0,
     };
 
-    for (const candidate of accountCandidates) {
-      const account = await this.processAccount(ctx, provider, candidate, request.workspaceId);
-      if (!account || account.status === 'DUPLICATE' || account.status === 'DISQUALIFIED') {
-        continue;
-      }
-      summary.accountsDiscovered += 1;
+    try {
+      const accountCandidates = await this.discoverAccounts(ctx, provider, request, profile);
 
-      const contacts = await this.processContacts(ctx, provider, account);
-      summary.contactsDiscovered += contacts.length;
+      for (const candidate of accountCandidates) {
+        const account = await this.processAccount(ctx, provider, candidate, request.workspaceId, researchRequest.id, researchRun.id);
+        if (!account || account.status === 'DUPLICATE' || account.status === 'DISQUALIFIED') {
+          continue;
+        }
+        summary.accountsDiscovered += 1;
 
-      for (const contact of contacts) {
-        await this.evaluateLead(ctx, account, contact, profile);
+        const contacts = await this.processContacts(ctx, provider, account, researchRequest.id, researchRun.id);
+        summary.contactsDiscovered += contacts.length;
+
+        for (const contact of contacts) {
+          await this.evaluateLead(ctx, account, contact, profile);
+        }
       }
+
+      summary.leadsQualified = (await this.deps.leadRepository.findQualified(ctx)).length;
+      summary.leadsNeedReview = (await this.deps.leadRepository.findByMission(ctx, request.missionId)).filter(
+        (l) => l.status === 'NEEDS_REVIEW',
+      ).length;
+
+      researchRun.succeed(new Date().toISOString());
+    } catch (error) {
+      researchRun.fail('RESEARCH_RUN_FAILED', 'Research run encountered an error during execution', new Date().toISOString());
+      throw error;
     }
-
-    summary.leadsQualified = (await this.deps.leadRepository.findQualified(ctx)).length;
-    summary.leadsNeedReview = (await this.deps.leadRepository.findByMission(ctx, request.missionId)).filter(
-      (l) => l.status === 'NEEDS_REVIEW',
-    ).length;
 
     return summary;
   }
@@ -158,6 +196,8 @@ export class ResearchEngine {
     provider: IResearchProvider,
     candidate: AccountCandidate,
     workspaceId: string,
+    requestId: ResearchRequestId,
+    runId: ResearchRunId,
   ): Promise<Account | null> {
     const duplicate = await this.deps.businessSystemAdapter.findDuplicateAccount(ctx, candidate);
     if (duplicate) {
@@ -184,7 +224,7 @@ export class ResearchEngine {
     const intelligence = await this.getCompanyIntelligence(ctx, provider, candidate.providerAccountId);
     const evidenceIds: string[] = [];
     for (const claim of this.extractAccountClaims(candidate, intelligence)) {
-      const evidence = this.createEvidence(ctx, claim, candidate.providerAccountId);
+      const evidence = this.createEvidence(ctx, claim, candidate.providerAccountId, workspaceId, requestId, runId);
       await this.deps.evidenceRepository.save(ctx, evidence);
       evidenceIds.push(evidence.evidenceId as string);
     }
@@ -248,28 +288,42 @@ export class ResearchEngine {
     ctx: TenantContext,
     claim: { claimType: string; normalizedValue: unknown; source: string; confidence: number },
     accountId: string,
+    workspaceId: string,
+    requestId: ResearchRequestId,
+    runId: ResearchRunId,
     missionId?: string,
   ): ResearchEvidence {
+    const normalizedValue = (claim.normalizedValue ?? null) as JsonValue;
+    const now = new Date().toISOString();
+    const fingerprint = this.deps.computeEvidenceFingerprint({
+      claimType: claim.claimType,
+      normalizedValue,
+      source: claim.source,
+    });
     return new ResearchEvidence({
       evidenceId: asEvidenceId(this.deps.generateEvidenceId()),
       tenantId: ctx.tenantId,
+      workspaceId,
+      requestId,
+      runId,
       accountId: asAccountId(accountId),
       missionId,
       claimType: claim.claimType,
-      normalizedValue: claim.normalizedValue,
+      normalizedValue,
       source: claim.source,
       reliabilityTier: 'PREMIUM_PROVIDER',
-      observedAt: new Date(),
-      freshnessExpiry: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      observedAt: now,
+      freshnessExpiry: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
       confidence: claim.confidence,
       confidenceBreakdown: { sourceReliability: 0.8, extractionConfidence: claim.confidence, corroboration: 0 },
       provenance: [
-        { step: 'provider-extract', inputSummary: claim.claimType, outputSummary: JSON.stringify(claim.normalizedValue), occurredAt: new Date() },
+        { step: 'provider-extract', inputSummary: claim.claimType, outputSummary: JSON.stringify(claim.normalizedValue), occurredAt: now },
       ],
+      evidenceFingerprint: fingerprint,
     });
   }
 
-  private async processContacts(ctx: TenantContext, provider: IResearchProvider, account: Account): Promise<Contact[]> {
+  private async processContacts(ctx: TenantContext, provider: IResearchProvider, account: Account, requestId: ResearchRequestId, runId: ResearchRunId): Promise<Contact[]> {
     const contacts: Contact[] = [];
     const candidates = await this.discoverContacts(ctx, provider, account.id as string);
     for (const candidate of candidates) {
@@ -281,6 +335,9 @@ export class ResearchEngine {
         ctx,
         { claimType: 'CONTACT_ROLE', normalizedValue: enriched.role ?? enriched.title, source: 'provider', confidence: enriched.confidence },
         account.id as string,
+        account.workspaceId,
+        requestId,
+        runId,
       );
       await this.deps.evidenceRepository.save(ctx, evidence);
 

@@ -1,4 +1,4 @@
-import { asAccountId, asContactId, asCorrelationId, asEventId, asEvidenceId, asICPProfileId, asICPProfileVersionId, asLeadId, asTenantId } from '@projectx/shared';
+import { asAccountId, asContactId, asCorrelationId, asEventId, asEvidenceId, asICPProfileId, asICPProfileVersionId, asLeadId, asResearchRequestId, asResearchRunId, asTenantId } from '@projectx/shared';
 import {
   Account,
   Contact,
@@ -210,39 +210,51 @@ describe('Lead', () => {
 
 describe('ResearchEvidence', () => {
   it('stores evidence with provenance and freshness', () => {
+    const now = new Date().toISOString();
+    const expiry = new Date(Date.now() + 86_400_000).toISOString();
     const evidence = new ResearchEvidence({
       evidenceId: asEvidenceId('ev-1'),
       tenantId: tenantId(),
+      workspaceId: 'ws-1',
+      requestId: asResearchRequestId('req-1'),
+      runId: asResearchRunId('run-1'),
       accountId: asAccountId('acc-1'),
       claimType: 'EMPLOYEE_COUNT',
       normalizedValue: 500,
       source: 'provider',
       reliabilityTier: 'PREMIUM_PROVIDER',
-      observedAt: new Date(),
-      freshnessExpiry: new Date(Date.now() + 86_400_000),
+      observedAt: now,
+      freshnessExpiry: expiry,
       confidence: 0.85,
       confidenceBreakdown: { sourceReliability: 0.8, extractionConfidence: 0.9, corroboration: 0 },
-      provenance: [{ step: 'provider-lookup', inputSummary: 'lookup', outputSummary: '500', occurredAt: new Date() }],
+      provenance: [{ step: 'provider-lookup', inputSummary: 'lookup', outputSummary: '500', occurredAt: now }],
+      evidenceFingerprint: 'fp-abc123',
     });
     expect(evidence.isFresh()).toBe(true);
     expect(evidence.confidence).toBe(0.85);
   });
 
-  it('tracks contradictions', () => {
+  it('preserves contradictions from creation', () => {
+    const now = new Date().toISOString();
+    const expiry = new Date(Date.now() + 86_400_000).toISOString();
     const evidence = new ResearchEvidence({
       evidenceId: asEvidenceId('ev-1'),
       tenantId: tenantId(),
+      workspaceId: 'ws-1',
+      requestId: asResearchRequestId('req-1'),
+      runId: asResearchRunId('run-1'),
       claimType: 'EMPLOYEE_COUNT',
       normalizedValue: 500,
       source: 'provider',
       reliabilityTier: 'PREMIUM_PROVIDER',
-      observedAt: new Date(),
-      freshnessExpiry: new Date(Date.now() + 86_400_000),
+      observedAt: now,
+      freshnessExpiry: expiry,
       confidence: 0.85,
       confidenceBreakdown: { sourceReliability: 0.8, extractionConfidence: 0.9, corroboration: 0 },
       provenance: [],
+      contradictions: [{ conflictingEvidenceId: asEvidenceId('ev-2'), reason: 'different count', resolution: 'UNRESOLVED' }],
+      evidenceFingerprint: 'fp-def456',
     });
-    const updated = evidence.addContradiction(asEvidenceId('ev-2'), 'different count', 'UNRESOLVED');
-    expect(updated.props.contradictions?.length).toBe(1);
+    expect(evidence.props.contradictions?.length).toBe(1);
   });
 });

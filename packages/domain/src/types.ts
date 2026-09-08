@@ -15,6 +15,7 @@ export type {
   PolicyId,
   ReplyMessageId,
   ResearchRequestId,
+  ResearchRunId,
   SignalId,
   TaskId,
   UserId,

@@ -1,4 +1,4 @@
-import { asAccountId, asContactId, asCorrelationId, asEventId, asICPProfileId, asICPProfileVersionId, asTenantId, type DomainEvent } from '@projectx/shared';
+import { asAccountId, asContactId, asCorrelationId, asEventId, asICPProfileId, asICPProfileVersionId, asResearchRequestId, asResearchRunId, asTenantId, type DomainEvent } from '@projectx/shared';
 import { ICPProfile } from '@projectx/domain';
 import type { TenantContext } from '@projectx/domain';
 import type { IEventBus } from '@projectx/infrastructure';
@@ -137,6 +137,10 @@ function createEngine() {
     generateEventId: () => asEventId(generate()),
     generateCorrelationId: () => asCorrelationId(generate()),
     generateEvidenceId: generate,
+    generateRequestId: () => asResearchRequestId(`req-${generate()}`),
+    generateRunId: () => asResearchRunId(`run-${generate()}`),
+    computeQueryHash: (input) => `qh-${input.icpProfileId}-${input.objective.slice(0, 8).replace(/\s/g, '_')}`,
+    computeEvidenceFingerprint: (input) => `ef-${input.claimType}-${String(input.normalizedValue).slice(0, 16).replace(/\s/g, '_')}`,
   });
 
   return { engine, icpRepo, accountRepo, contactRepo, leadRepo, evidenceRepo, eventBus, auditLog };
@@ -175,6 +179,7 @@ describe('ResearchEngine', () => {
 
     const result = await engine.run(ctx, {
       missionId: 'mission-1',
+      workspaceId: 'ws-1',
       icpProfileId: 'icp-1',
       objective: 'find qualified prospects',
       territories: ['US'],
@@ -205,6 +210,7 @@ describe('ResearchEngine', () => {
 
     await engine.run(ctx, {
       missionId: 'mission-2',
+      workspaceId: 'ws-1',
       icpProfileId: 'icp-1',
       objective: 'find qualified prospects',
       territories: ['US'],
@@ -227,7 +233,7 @@ describe('ResearchEngine', () => {
     ]);
     // Re-create engine with custom adapter (omitted for brevity; engine already has empty adapter, so no duplicate)
 
-    await engine.run(ctx, { missionId: 'mission-3', icpProfileId: 'icp-1', objective: '', maxResults: 10 });
+    await engine.run(ctx, { missionId: 'mission-3', workspaceId: 'ws-1', icpProfileId: 'icp-1', objective: '', maxResults: 10 });
 
     const account = await accountRepo.findById(ctx, 'acc-acme');
     expect(account).toBeTruthy();

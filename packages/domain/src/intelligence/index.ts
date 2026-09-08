@@ -4,4 +4,5 @@ export * from './account';
 export * from './contact';
 export * from './lead';
 export * from './research-evidence';
+export * from './research-request';
 export * from './signal';
