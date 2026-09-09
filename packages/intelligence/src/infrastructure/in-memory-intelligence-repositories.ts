@@ -2,6 +2,7 @@ import type { Account, Contact, ICPProfile, Lead, ResearchEvidence, TenantContex
 import { TenantIsolationError, AuthorizationError } from '@projectx/domain';
 import type {
   AccountRepositoryContext,
+  ContactRepositoryContext,
   IAccountRepository,
   IContactRepository,
   IICPProfileRepository,
@@ -60,21 +61,31 @@ export class InMemoryAccountRepository implements IAccountRepository {
 export class InMemoryContactRepository implements IContactRepository {
   private readonly store = new Map<string, Contact>();
 
-  private key(ctx: TenantContext, id: string): string {
-    return `${ctx.tenantId}:${id}`;
+  private key(ctx: ContactRepositoryContext, id: string): string {
+    return `${ctx.tenantId}:${ctx.workspaceId}:${id}`;
   }
 
-  async findById(ctx: TenantContext, id: string): Promise<Contact | null> {
+  async findById(ctx: ContactRepositoryContext, id: string): Promise<Contact | null> {
     return this.store.get(this.key(ctx, id)) ?? null;
   }
 
-  async save(ctx: TenantContext, contact: Contact): Promise<void> {
+  async save(ctx: ContactRepositoryContext, contact: Contact): Promise<void> {
+    if (ctx.tenantId !== contact.tenantId) {
+      throw new TenantIsolationError(
+        `Contact tenant ${contact.tenantId} does not match context tenant ${ctx.tenantId}`,
+      );
+    }
+    if (ctx.workspaceId !== contact.workspaceId) {
+      throw new AuthorizationError(
+        `Contact workspace ${contact.workspaceId} does not match authorized workspace ${ctx.workspaceId}`,
+      );
+    }
     this.store.set(this.key(ctx, contact.id as string), contact);
   }
 
-  async findByAccount(ctx: TenantContext, accountId: string): Promise<Contact[]> {
+  async findByAccount(ctx: ContactRepositoryContext, accountId: string): Promise<Contact[]> {
     return Array.from(this.store.values()).filter(
-      (c) => c.tenantId === ctx.tenantId && c.accountId === accountId,
+      (c) => c.tenantId === ctx.tenantId && c.workspaceId === ctx.workspaceId && c.accountId === accountId,
     );
   }
 }

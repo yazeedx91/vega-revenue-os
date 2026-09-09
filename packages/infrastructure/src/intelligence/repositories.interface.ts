@@ -8,14 +8,20 @@ export interface AccountRepositoryContext extends TenantContext {
   readonly workspaceId: string;
 }
 
+export interface ContactRepositoryContext extends TenantContext {
+  readonly workspaceId: string;
+}
+
 export interface IAccountRepository {
   findById(ctx: AccountRepositoryContext, id: string): Promise<Account | null>;
   save(ctx: AccountRepositoryContext, aggregate: Account): Promise<void>;
   findQualified(ctx: AccountRepositoryContext): Promise<Account[]>;
 }
 
-export interface IContactRepository extends IRepository<Contact, string> {
-  findByAccount(ctx: TenantContext, accountId: string): Promise<Contact[]>;
+export interface IContactRepository {
+  findById(ctx: ContactRepositoryContext, id: string): Promise<Contact | null>;
+  save(ctx: ContactRepositoryContext, aggregate: Contact): Promise<void>;
+  findByAccount(ctx: ContactRepositoryContext, accountId: string): Promise<Contact[]>;
 }
 
 export interface ILeadRepository extends IRepository<Lead, string> {

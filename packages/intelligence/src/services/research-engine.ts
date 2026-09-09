@@ -17,6 +17,7 @@ import type { JsonValue } from '@projectx/domain';
 import type { IEventBus } from '@projectx/infrastructure';
 import type {
   AccountRepositoryContext,
+  ContactRepositoryContext,
   IAccountRepository,
   IContactRepository,
   IICPProfileRepository,
@@ -365,7 +366,8 @@ export class ResearchEngine {
       if (enriched.validationStatus === 'VALID') {
         contact.validate(this.deps.generateCorrelationId(), this.deps.generateEventId());
       }
-      await this.deps.contactRepository.save(ctx, contact);
+      const contactCtx: ContactRepositoryContext = { ...ctx, workspaceId: account.workspaceId };
+      await this.deps.contactRepository.save(contactCtx, contact);
       await this.publishEvents(contact);
       contacts.push(contact);
     }
