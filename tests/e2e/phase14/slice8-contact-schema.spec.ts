@@ -29,7 +29,7 @@ const CIPHER_1 = 'e1.v1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 const CIPHER_2 = 'e1.v1.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
 const PHONE_FP_1 = 'h1.v1.CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
 
-describe('Slice 8B2b — Contact Schema', () => {
+describe('Slice 8B2b/8B2c — Contact Schema with Concurrency', () => {
   let adminPool: Pool;
   let appPool: Pool;
 
@@ -474,5 +474,119 @@ describe('Slice 8B2b — Contact Schema', () => {
         ['contact-8b2b-rls-write', TENANT_B, WS_B1, ACC_B1],
       ),
     ).rejects.toThrow();
+  });
+
+  // 25. contact_version column exists and is INTEGER NOT NULL
+  it('contact_version column exists with correct type and NOT NULL', async () => {
+    const result = await adminPool.query(`
+      SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'intelligence'
+        AND table_name = 'contacts'
+        AND column_name = 'contact_version'
+    `);
+    expect(result.rows.length).toBe(1);
+    expect(result.rows[0].data_type).toBe('integer');
+    expect(result.rows[0].is_nullable).toBe('NO');
+  });
+
+  // 26. contact_version CHECK constraint exists (version >= 1)
+  it('contact_version CHECK constraint rejects invalid versions', async () => {
+    await expect(
+      adminPool.query(
+        `INSERT INTO intelligence.contacts (contact_id, tenant_id, workspace_id, account_id, contact_version, status, verification_state)
+         VALUES ($1, $2, $3, $4, 0, 'DISCOVERED', 'UNVERIFIED')`,
+        ['contact-8b2c-version-0', TENANT_A, WS_A1, ACC_A1],
+      ),
+    ).rejects.toThrow(/check constraint/);
+
+    await expect(
+      adminPool.query(
+        `INSERT INTO intelligence.contacts (contact_id, tenant_id, workspace_id, account_id, contact_version, status, verification_state)
+         VALUES ($1, $2, $3, $4, -1, 'DISCOVERED', 'UNVERIFIED')`,
+        ['contact-8b2c-version-neg', TENANT_A, WS_A1, ACC_A1],
+      ),
+    ).rejects.toThrow(/check constraint/);
+  });
+
+  // 27. valid initial aggregate version (1) is accepted
+  it('contact_version = 1 (initial aggregate version) is accepted', async () => {
+    await adminPool.query(
+      `INSERT INTO intelligence.contacts (contact_id, tenant_id, workspace_id, account_id, contact_version, status, verification_state)
+       VALUES ($1, $2, $3, $4, 1, 'DISCOVERED', 'UNVERIFIED')`,
+      ['contact-8b2c-version-1', TENANT_A, WS_A1, ACC_A1],
+    );
+  });
+
+  // 28. default backfill for existing rows is 1
+  it('INSERT without explicit contact_version uses default 1', async () => {
+    await adminPool.query(
+      `INSERT INTO intelligence.contacts (contact_id, tenant_id, workspace_id, account_id, status, verification_state)
+       VALUES ($1, $2, $3, $4, 'DISCOVERED', 'UNVERIFIED')`,
+      ['contact-8b2c-version-default', TENANT_A, WS_A1, ACC_A1],
+    );
+
+    const result = await adminPool.query(
+      `SELECT contact_version FROM intelligence.contacts WHERE contact_id = $1`,
+      ['contact-8b2c-version-default'],
+    );
+    expect(result.rows[0].contact_version).toBe(1);
+  });
+
+  // 29. Existing 8B2b constraints remain intact after concurrency migration
+  it('email fingerprint dedup index still exists after migration', async () => {
+    const result = await adminPool.query(`
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'intelligence'
+        AND tablename = 'contacts'
+        AND indexname = 'contacts_workspace_account_email_fingerprint_dedup'
+    `);
+    expect(result.rows.length).toBe(1);
+  });
+
+  it('phone fingerprint dedup index still exists after migration', async () => {
+    const result = await adminPool.query(`
+      SELECT indexname
+      FROM pg_indexes
+      WHERE schemaname = 'intelligence'
+        AND tablename = 'contacts'
+        AND indexname = 'contacts_workspace_account_phone_fingerprint_dedup'
+    `);
+    expect(result.rows.length).toBe(1);
+  });
+
+  it('workspace ownership FK still exists after migration', async () => {
+    const result = await adminPool.query(`
+      SELECT tc.constraint_name
+      FROM information_schema.table_constraints AS tc
+      WHERE tc.table_schema = 'intelligence'
+        AND tc.table_name = 'contacts'
+        AND tc.constraint_type = 'FOREIGN KEY'
+        AND tc.constraint_name = 'contacts_tenant_workspace_fk'
+    `);
+    expect(result.rows.length).toBe(1);
+  });
+
+  it('account ownership FK still exists after migration', async () => {
+    const result = await adminPool.query(`
+      SELECT tc.constraint_name
+      FROM information_schema.table_constraints AS tc
+      WHERE tc.table_schema = 'intelligence'
+        AND tc.table_name = 'contacts'
+        AND tc.constraint_type = 'FOREIGN KEY'
+        AND tc.constraint_name = 'contacts_account_ownership_fk'
+    `);
+    expect(result.rows.length).toBe(1);
+  });
+
+  it('RLS still enabled after migration', async () => {
+    const result = await adminPool.query(`
+      SELECT relrowsecurity
+      FROM pg_class
+      JOIN pg_namespace ON pg_class.relnamespace = pg_namespace.oid
+      WHERE pg_namespace.nspname = 'intelligence' AND pg_class.relname = 'contacts'
+    `);
+    expect(result.rows[0].relrowsecurity).toBe(true);
   });
 });
