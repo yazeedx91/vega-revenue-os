@@ -95,6 +95,7 @@ describe('Slice 8B2b/8B2c — Contact Schema with Concurrency', () => {
     await adminPool.query('BEGIN');
     try {
       await adminPool.query(`DELETE FROM intelligence.contacts WHERE contact_id LIKE 'contact-8b2b-%'`);
+      await adminPool.query(`DELETE FROM intelligence.contacts WHERE contact_id LIKE 'contact-8b2c-%'`);
       await adminPool.query(`DELETE FROM intelligence.accounts WHERE account_id LIKE 'acc-8b2b-%'`);
       await adminPool.query(`DELETE FROM identity.workspaces WHERE id = $1`, [WS_A1]);
       await adminPool.query(`DELETE FROM identity.workspaces WHERE id = $1`, [WS_A2]);
@@ -157,6 +158,7 @@ describe('Slice 8B2b/8B2c — Contact Schema with Concurrency', () => {
       'evidence_references',
       'created_at',
       'updated_at',
+      'contact_version',
     ];
     expect(columns).toEqual(expected);
   });
