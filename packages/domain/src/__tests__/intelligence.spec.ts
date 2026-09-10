@@ -19,6 +19,7 @@ function defaultProfileProps() {
     versionId: asICPProfileVersionId('icp-1-v1'),
     version: 1,
     tenantId: tenantId(),
+    workspaceId: 'ws-1',
     name: 'Manufacturing ICP',
     hardFilters: {
       industries: ['Manufacturing'],

@@ -24,6 +24,14 @@ export class InMemoryICPProfileRepository implements IICPProfileRepository {
     return this.store.get(this.key(ctx, id)) ?? null;
   }
 
+  async findByVersionId(ctx: ICPProfileRepositoryContext, versionId: string): Promise<ICPProfile | null> {
+    return (
+      Array.from(this.store.values()).find(
+        (p) => p.tenantId === ctx.tenantId && p.workspaceId === ctx.workspaceId && p.versionId === versionId,
+      ) ?? null
+    );
+  }
+
   async save(ctx: ICPProfileRepositoryContext, profile: ICPProfile): Promise<void> {
     this.store.set(this.key(ctx, profile.id as string), profile);
   }

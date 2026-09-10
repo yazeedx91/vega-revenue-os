@@ -8,6 +8,7 @@ export interface ICPProfileRepositoryContext extends TenantContext {
 
 export interface IICPProfileRepository {
   findById(ctx: ICPProfileRepositoryContext, id: string): Promise<ICPProfile | null>;
+  findByVersionId(ctx: ICPProfileRepositoryContext, versionId: string): Promise<ICPProfile | null>;
   save(ctx: ICPProfileRepositoryContext, aggregate: ICPProfile): Promise<void>;
   findActiveByWorkspace(ctx: ICPProfileRepositoryContext): Promise<ICPProfile | null>;
 }
