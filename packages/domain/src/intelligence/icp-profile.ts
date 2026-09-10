@@ -22,6 +22,7 @@ export interface ICPProfileProps {
   versionId: ICPProfileVersionId;
   version: number;
   tenantId: TenantId;
+  workspaceId: string;
   name: string;
   hardFilters: ICPHardFilter;
   softCriteria: Array<{ criterion: string; weight: number }>;
@@ -46,6 +47,7 @@ export class ICPProfileInvariantError extends Error {
 }
 
 export class ICPProfile extends AggregateRoot<ICPProfileId> {
+  public readonly workspaceId: string;
   public readonly versionId: ICPProfileVersionId;
   public readonly versionNumber: number;
   public readonly name: string;
@@ -63,6 +65,7 @@ export class ICPProfile extends AggregateRoot<ICPProfileId> {
 
   private constructor(props: ICPProfileProps) {
     super(props.tenantId, props.id ?? asICPProfileId('icp-unknown'));
+    this.workspaceId = props.workspaceId;
     this.versionId = props.versionId;
     this.versionNumber = props.version;
     this.name = props.name;
@@ -124,7 +127,7 @@ export class ICPProfile extends AggregateRoot<ICPProfileId> {
   }
 
   createNextVersion(
-    changes: Partial<Omit<ICPProfileProps, 'id' | 'tenantId' | 'version' | 'versionId'>>,
+    changes: Partial<Omit<ICPProfileProps, 'id' | 'tenantId' | 'workspaceId' | 'version' | 'versionId'>>,
     nextVersionId: ICPProfileVersionId,
     correlationId: CorrelationId,
     eventId: EventId,
@@ -135,6 +138,7 @@ export class ICPProfile extends AggregateRoot<ICPProfileId> {
       versionId: nextVersionId,
       version: nextVersion,
       tenantId: this.tenantId,
+      workspaceId: this.workspaceId,
       name: changes.name ?? this.name,
       hardFilters: changes.hardFilters ?? this.hardFilters,
       softCriteria: changes.softCriteria ?? this.softCriteria,

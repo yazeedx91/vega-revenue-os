@@ -16,6 +16,7 @@ import { ConcurrencyConflictError } from '@projectx/infrastructure';
 import type { IAgentExecutor, IAgentRegistry, IPlanner } from '@projectx/ai-runtime';
 import type { IMissionRepository } from '../ports/mission-repository.interface';
 import type { ICompensationPort } from '../ports/compensation-port.interface';
+import type { IMissionWorkspaceResolver } from '../ports/mission-workspace-resolver.interface';
 import type { ApprovalApplicationService } from '../application/approval-application.service';
 import { mapMissionToContract } from './mission-mapper';
 
@@ -27,6 +28,7 @@ export interface MissionExecutionEngineDependencies {
   approvalService: ApprovalApplicationService;
   eventBus: IEventBus;
   compensationPort: ICompensationPort;
+  missionWorkspaceResolver: IMissionWorkspaceResolver;
   generateEventId: () => EventId;
   generateCorrelationId: () => CorrelationId;
   generateIdempotencyKey: (hint: string) => IdempotencyKey;
@@ -209,7 +211,8 @@ export class MissionExecutionEngine {
       }
     }
 
-    const request = this.buildExecutionRequest(ctx, mission, task, executionId);
+    const workspaceId = await this.deps.missionWorkspaceResolver.resolveAuthorizedWorkspace(ctx, mission.id);
+    const request = this.buildExecutionRequest(ctx, mission, task, executionId, workspaceId);
     return this.deps.agentExecutor.execute(request);
   }
 
@@ -527,6 +530,7 @@ export class MissionExecutionEngine {
     mission: Mission,
     task: MissionTask,
     executionId: string,
+    workspaceId: string,
   ): AIExecutionRequest {
     const budget: ExecutionBudget = {
       maxTokens: 10000,
@@ -552,6 +556,7 @@ export class MissionExecutionEngine {
       context: {
         mission: mapMissionToContract(mission) as unknown as Record<string, unknown>,
         target: task.input as Record<string, unknown>,
+        authorization: { workspaceId },
       },
       capabilities: task.requiredCapability ? [task.requiredCapability] : ['research'],
       policyContext,

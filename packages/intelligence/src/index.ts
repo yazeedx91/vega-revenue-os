@@ -14,6 +14,10 @@ export * from './infrastructure/stub-research-provider';
 export * from './infrastructure/dynamics-intelligence-adapter.stub';
 export * from './infrastructure/postgres-account-repository';
 export * from './infrastructure/postgres-contact-repository';
+export * from './infrastructure/postgres-icp-profile-repository';
+export * from './infrastructure/postgres-signal-repository';
+export * from './infrastructure/postgres-research-repositories';
+export * from './infrastructure/postgres-intelligence-cache';
 
 export * from './services/scoring';
 export * from './services/research-engine';

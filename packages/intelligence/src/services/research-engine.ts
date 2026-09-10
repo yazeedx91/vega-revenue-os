@@ -5,6 +5,8 @@ import {
   ResearchEvidence,
   ResearchRequest,
   ResearchRun,
+  Signal,
+  SIGNAL_CATEGORIES,
   type AccountId,
   type ContactId,
   type ICPProfile,
@@ -12,7 +14,7 @@ import {
   type ResearchEvidenceProps,
   type TenantContext,
 } from '@projectx/domain';
-import { asAccountId, asContactId, asEvidenceId, asLeadId, type CorrelationId, type EventId, type ResearchRequestId, type ResearchRunId } from '@projectx/shared';
+import { asAccountId, asContactId, asEvidenceId, asLeadId, asSignalId, type CorrelationId, type EventId, type ResearchRequestId, type ResearchRunId } from '@projectx/shared';
 import type { JsonValue } from '@projectx/domain';
 import type { IEventBus } from '@projectx/infrastructure';
 import type {
@@ -23,6 +25,11 @@ import type {
   IICPProfileRepository,
   ILeadRepository,
   IResearchEvidenceRepository,
+  IResearchLifecycleRepository,
+  ISignalRepository,
+  LeadRepositoryContext,
+  ResearchEvidenceRepositoryContext,
+  SignalRepositoryContext,
 } from '@projectx/infrastructure';
 import type { IIntelligenceAuditLog } from '../ports/intelligence-audit-log.interface';
 import type { IIntelligenceCache } from '../ports/intelligence-cache.interface';
@@ -44,7 +51,9 @@ export interface ResearchEngineDependencies {
   accountRepository: IAccountRepository;
   contactRepository: IContactRepository;
   leadRepository: ILeadRepository;
+  signalRepository: ISignalRepository;
   evidenceRepository: IResearchEvidenceRepository;
+  researchLifecycleRepository: IResearchLifecycleRepository;
   providerRegistry: IProviderRegistry;
   rateLimitStore: IRateLimitStore;
   cache: IIntelligenceCache;
@@ -80,7 +89,8 @@ export class ResearchEngine {
   constructor(private readonly deps: ResearchEngineDependencies) {}
 
   async run(ctx: TenantContext, request: ResearchRunRequest): Promise<ResearchRunResult> {
-    const profile = await this.deps.icpProfileRepository.findById(ctx, request.icpProfileId);
+    const profileCtx = { ...ctx, workspaceId: request.workspaceId };
+    const profile = await this.deps.icpProfileRepository.findById(profileCtx, request.icpProfileId);
     if (!profile) {
       throw new Error(`ICP profile ${request.icpProfileId} not found`);
     }
@@ -112,6 +122,9 @@ export class ResearchEngine {
       requestId: researchRequest.id,
     });
     researchRun.start(now);
+    const researchCtx: ResearchEvidenceRepositoryContext = { ...ctx, workspaceId: request.workspaceId };
+    await this.deps.researchLifecycleRepository.saveRequest(researchCtx, researchRequest);
+    await this.deps.researchLifecycleRepository.saveRun(researchCtx, researchRun);
 
     const summary: ResearchRunResult = {
       accountsDiscovered: 0,
@@ -134,18 +147,21 @@ export class ResearchEngine {
         summary.contactsDiscovered += contacts.length;
 
         for (const contact of contacts) {
-          await this.evaluateLead(ctx, account, contact, profile);
+          await this.evaluateLead(ctx, account, contact, profile, request.missionId, researchRequest.id, researchRun.id);
         }
       }
 
-      summary.leadsQualified = (await this.deps.leadRepository.findQualified(ctx)).length;
-      summary.leadsNeedReview = (await this.deps.leadRepository.findByMission(ctx, request.missionId)).filter(
+      const leadCtx = { ...ctx, workspaceId: request.workspaceId };
+      summary.leadsQualified = (await this.deps.leadRepository.findQualified(leadCtx)).length;
+      summary.leadsNeedReview = (await this.deps.leadRepository.findByMission(leadCtx, request.missionId)).filter(
         (l) => l.status === 'NEEDS_REVIEW',
       ).length;
 
       researchRun.succeed(new Date().toISOString());
+      await this.deps.researchLifecycleRepository.saveRun(researchCtx, researchRun);
     } catch (error) {
       researchRun.fail('RESEARCH_RUN_FAILED', 'Research run encountered an error during execution', new Date().toISOString());
+      await this.deps.researchLifecycleRepository.saveRun(researchCtx, researchRun);
       throw error;
     }
 
@@ -163,7 +179,8 @@ export class ResearchEngine {
     profile: ICPProfile,
   ): Promise<AccountCandidate[]> {
     const cacheKey = `accounts:${request.icpProfileId}:${(request.territories ?? []).join(',')}:${request.maxResults ?? 10}`;
-    const cached = await this.deps.cache.get<AccountCandidate[]>(ctx, cacheKey);
+    const cacheCtx = { ...ctx, workspaceId: request.workspaceId };
+    const cached = await this.deps.cache.get<AccountCandidate[]>(cacheCtx, cacheKey);
     if (cached) {
       await this.deps.auditLog.record(ctx, { action: 'CACHE_HIT', result: 'SUCCESS', missionId: request.missionId });
       return cached.value;
@@ -176,7 +193,7 @@ export class ResearchEngine {
       industries: profile.hardFilters.industries,
       maxResults: request.maxResults ?? 10,
     });
-    await this.deps.cache.set<AccountCandidate[]>(ctx, cacheKey, {
+    await this.deps.cache.set<AccountCandidate[]>(cacheCtx, cacheKey, {
       value: candidates,
       cachedAt: new Date(),
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -224,14 +241,7 @@ export class ResearchEngine {
       return account;
     }
 
-    const intelligence = await this.getCompanyIntelligence(ctx, provider, candidate.providerAccountId);
-    const evidenceIds: string[] = [];
-    for (const claim of this.extractAccountClaims(candidate, intelligence)) {
-      const evidence = this.createEvidence(ctx, claim, candidate.providerAccountId, workspaceId, requestId, runId);
-      await this.deps.evidenceRepository.save(ctx, evidence);
-      evidenceIds.push(evidence.evidenceId as string);
-    }
-
+    const intelligence = await this.getCompanyIntelligence(ctx, provider, candidate.providerAccountId, workspaceId);
     const account = Account.create(
       {
         id: asAccountId(candidate.providerAccountId),
@@ -244,13 +254,22 @@ export class ResearchEngine {
         annualRevenueUsd: candidate.annualRevenueUsd ?? intelligence.firmographics.annualRevenueUsd,
         territories: intelligence.firmographics.territories,
         techStack: intelligence.technographics,
-        evidenceReferences: evidenceIds as any,
       },
       this.deps.generateCorrelationId(),
       this.deps.generateEventId(),
     );
-    account.enrich({}, evidenceIds as any, this.deps.generateCorrelationId(), this.deps.generateEventId());
     const accountCtx: AccountRepositoryContext = { ...ctx, workspaceId };
+    await this.deps.accountRepository.save(accountCtx, account);
+
+    const evidenceCtx = { ...ctx, workspaceId };
+    const evidenceIds: string[] = [];
+    for (const claim of this.extractAccountClaims(candidate, intelligence)) {
+      const evidence = this.createEvidence(ctx, claim, candidate.providerAccountId, workspaceId, requestId, runId);
+      await this.deps.evidenceRepository.save(evidenceCtx, evidence);
+      evidenceIds.push(evidence.evidenceId as string);
+    }
+
+    account.enrich({}, evidenceIds as any, this.deps.generateCorrelationId(), this.deps.generateEventId());
     await this.deps.accountRepository.save(accountCtx, account);
     await this.publishEvents(account);
     return account;
@@ -260,13 +279,15 @@ export class ResearchEngine {
     ctx: TenantContext,
     provider: IResearchProvider,
     providerAccountId: string,
+    workspaceId: string,
   ): Promise<CompanyIntelligence> {
     const cacheKey = `intelligence:${providerAccountId}`;
-    const cached = await this.deps.cache.get<CompanyIntelligence>(ctx, cacheKey);
+    const cacheCtx = { ...ctx, workspaceId };
+    const cached = await this.deps.cache.get<CompanyIntelligence>(cacheCtx, cacheKey);
     if (cached) return cached.value;
     await this.checkRateLimit(ctx, provider.providerId, 1);
     const intelligence = await provider.getCompanyIntelligence(ctx, providerAccountId);
-    await this.deps.cache.set<CompanyIntelligence>(ctx, cacheKey, {
+    await this.deps.cache.set<CompanyIntelligence>(cacheCtx, cacheKey, {
       value: intelligence,
       cachedAt: new Date(),
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -329,12 +350,12 @@ export class ResearchEngine {
 
   private async processContacts(ctx: TenantContext, provider: IResearchProvider, account: Account, requestId: ResearchRequestId, runId: ResearchRunId): Promise<Contact[]> {
     const contacts: Contact[] = [];
-    const candidates = await this.discoverContacts(ctx, provider, account.id as string);
+    const candidates = await this.discoverContacts(ctx, provider, account.id as string, account.workspaceId);
     for (const candidate of candidates) {
       const duplicate = await this.deps.businessSystemAdapter.findDuplicateContact(ctx, candidate);
       if (duplicate) continue;
 
-      const enriched = await this.enrichContact(ctx, provider, candidate);
+      const enriched = await this.enrichContact(ctx, provider, candidate, account.workspaceId);
       const evidence = this.createEvidence(
         ctx,
         { claimType: 'CONTACT_ROLE', normalizedValue: enriched.role ?? enriched.title, source: 'provider', confidence: enriched.confidence },
@@ -343,7 +364,8 @@ export class ResearchEngine {
         requestId,
         runId,
       );
-      await this.deps.evidenceRepository.save(ctx, evidence);
+      const evidenceCtx: ResearchEvidenceRepositoryContext = { ...ctx, workspaceId: account.workspaceId };
+      await this.deps.evidenceRepository.save(evidenceCtx, evidence);
 
       const contact = Contact.discover(
         {
@@ -374,13 +396,14 @@ export class ResearchEngine {
     return contacts;
   }
 
-  private async discoverContacts(ctx: TenantContext, provider: IResearchProvider, accountId: string): Promise<ContactCandidate[]> {
+  private async discoverContacts(ctx: TenantContext, provider: IResearchProvider, accountId: string, workspaceId: string): Promise<ContactCandidate[]> {
     const cacheKey = `contacts:${accountId}`;
-    const cached = await this.deps.cache.get<ContactCandidate[]>(ctx, cacheKey);
+    const cacheCtx = { ...ctx, workspaceId };
+    const cached = await this.deps.cache.get<ContactCandidate[]>(cacheCtx, cacheKey);
     if (cached) return cached.value;
     await this.checkRateLimit(ctx, provider.providerId, 1);
     const candidates = await provider.discoverContacts(ctx, accountId);
-    await this.deps.cache.set<ContactCandidate[]>(ctx, cacheKey, {
+    await this.deps.cache.set<ContactCandidate[]>(cacheCtx, cacheKey, {
       value: candidates,
       cachedAt: new Date(),
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -391,13 +414,14 @@ export class ResearchEngine {
     return candidates;
   }
 
-  private async enrichContact(ctx: TenantContext, provider: IResearchProvider, candidate: ContactCandidate): Promise<EnrichedContact> {
+  private async enrichContact(ctx: TenantContext, provider: IResearchProvider, candidate: ContactCandidate, workspaceId: string): Promise<EnrichedContact> {
     const cacheKey = `enriched-contact:${candidate.providerContactId}`;
-    const cached = await this.deps.cache.get<EnrichedContact>(ctx, cacheKey);
+    const cacheCtx = { ...ctx, workspaceId };
+    const cached = await this.deps.cache.get<EnrichedContact>(cacheCtx, cacheKey);
     if (cached) return cached.value;
     await this.checkRateLimit(ctx, provider.providerId, 1);
     const enriched = await provider.enrichContact(ctx, candidate);
-    await this.deps.cache.set<EnrichedContact>(ctx, cacheKey, {
+    await this.deps.cache.set<EnrichedContact>(cacheCtx, cacheKey, {
       value: enriched,
       cachedAt: new Date(),
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -408,12 +432,22 @@ export class ResearchEngine {
     return enriched;
   }
 
-  private async evaluateLead(ctx: TenantContext, account: Account, contact: Contact, profile: ICPProfile): Promise<void> {
-    const signals = await this.detectSignalsForAccount(ctx, account);
+  private async evaluateLead(
+    ctx: TenantContext,
+    account: Account,
+    contact: Contact,
+    profile: ICPProfile,
+    missionId: string,
+    requestId: ResearchRequestId,
+    runId: ResearchRunId,
+  ): Promise<void> {
+    const evaluatedAt = new Date();
+    const signals = await this.detectSignalsForAccount(ctx, account, requestId, runId, missionId, evaluatedAt);
     const icpResult = new ICPScorer().score(account, profile);
     const signalScore = new SignalScorer().score(signals.map((s) => ({ relevance: s.relevance, confidence: s.confidence })));
 
-    const evidence = await this.deps.evidenceRepository.findByAccount(ctx, account.id as string);
+    const evidenceCtx: ResearchEvidenceRepositoryContext = { ...ctx, workspaceId: account.workspaceId };
+    const evidence = await this.deps.evidenceRepository.findByAccount(evidenceCtx, account.id as string);
     const evidenceConfidence = computeEvidenceConfidence(
       evidence.map((e) => ({ confidence: e.confidence, isFresh: e.isFresh() })),
     );
@@ -430,7 +464,7 @@ export class ResearchEngine {
         id: asLeadId(`lead-${account.id as string}-${contact.id as string}`),
         tenantId: ctx.tenantId,
         workspaceId: account.workspaceId,
-        missionId: undefined,
+        missionId,
         accountId: account.id as AccountId,
         contactId: contact.id as ContactId,
         icpProfileId: profile.id,
@@ -449,7 +483,7 @@ export class ResearchEngine {
         reviewThreshold: profile.reviewThreshold,
         hardFilterResults,
         evidenceIds: evidence.map((e) => e.evidenceId) as any,
-        signalIds: [],
+        signalIds: signals.map((signal) => signal.id),
         normalizedFeatures: {
           industry: account.industry ?? null,
           employeeCount: account.employeeCount ?? null,
@@ -458,13 +492,14 @@ export class ResearchEngine {
         snapshotSchemaVersion: '1.0',
         scoringPolicyVersion: '1.0',
         algorithmVersion: '1.0',
-        evaluatedAt: new Date(),
+        evaluatedAt,
       },
       this.deps.generateCorrelationId(),
       this.deps.generateEventId(),
     );
 
-    await this.deps.leadRepository.save(ctx, lead);
+    const leadCtx: LeadRepositoryContext = { ...ctx, workspaceId: account.workspaceId };
+    await this.deps.leadRepository.save(leadCtx, lead);
     await this.publishEvents(lead);
   }
 
@@ -486,19 +521,27 @@ export class ResearchEngine {
     return results;
   }
 
-  private async detectSignalsForAccount(ctx: TenantContext, account: Account): Promise<Array<{ relevance: number; confidence: number }>> {
+  private async detectSignalsForAccount(
+    ctx: TenantContext,
+    account: Account,
+    requestId: ResearchRequestId,
+    runId: ResearchRunId,
+    missionId: string,
+    evaluatedAt: Date,
+  ): Promise<Signal[]> {
     const provider = await this.deps.providerRegistry.select(ctx, { capability: 'detect-signals' });
     if (!provider) return [];
     const cacheKey = `signals:${account.id as string}`;
-    const cached = await this.deps.cache.get<BuyingSignal[]>(ctx, cacheKey);
-    let signals: BuyingSignal[];
+    const cacheCtx = { ...ctx, workspaceId: account.workspaceId };
+    const cached = await this.deps.cache.get<BuyingSignal[]>(cacheCtx, cacheKey);
+    let detected: BuyingSignal[];
     if (cached) {
-      signals = cached.value;
+      detected = cached.value;
     } else {
       await this.checkRateLimit(ctx, provider.providerId, 1);
-      signals = await provider.detectSignals(ctx, account.id as string);
-      await this.deps.cache.set<BuyingSignal[]>(ctx, cacheKey, {
-        value: signals,
+      detected = await provider.detectSignals(ctx, account.id as string);
+      await this.deps.cache.set<BuyingSignal[]>(cacheCtx, cacheKey, {
+        value: detected,
         cachedAt: new Date(),
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         providerId: provider.providerId,
@@ -506,7 +549,38 @@ export class ResearchEngine {
       });
       await this.deps.auditLog.record(ctx, { action: 'DETECT_SIGNALS', providerId: provider.providerId, result: 'SUCCESS' });
     }
-    return signals.map((s) => ({ relevance: s.relevance, confidence: s.confidence }));
+
+    const signalCtx: SignalRepositoryContext = { ...ctx, workspaceId: account.workspaceId };
+    const evidenceCtx: ResearchEvidenceRepositoryContext = { ...ctx, workspaceId: account.workspaceId };
+    for (const candidate of detected) {
+      const observedSignal = this.sanitizeExternalText(candidate.observedSignal);
+      const interpretedSignal = this.sanitizeExternalText(candidate.interpretedSignal);
+      const claim = { claimType: 'BUYING_SIGNAL', normalizedValue: observedSignal, source: candidate.source, confidence: candidate.confidence };
+      const fingerprint = this.deps.computeEvidenceFingerprint({ claimType: claim.claimType, normalizedValue: claim.normalizedValue, source: claim.source });
+      let evidence = await this.deps.evidenceRepository.findByFingerprint(evidenceCtx, fingerprint);
+      if (!evidence) {
+        evidence = this.createEvidence(ctx, claim, account.id as string, account.workspaceId, requestId, runId, missionId);
+        await this.deps.evidenceRepository.save(evidenceCtx, evidence);
+      }
+      const signalType = SIGNAL_CATEGORIES.includes(candidate.signalType as any) ? candidate.signalType as any : 'BusinessChange';
+      const effectiveFrom = candidate.observedAt;
+      const effectiveUntil = new Date(effectiveFrom.getTime() + 30 * 24 * 60 * 60 * 1000);
+      const props = {
+        id: asSignalId(candidate.signalId), tenantId: ctx.tenantId, workspaceId: account.workspaceId,
+        accountId: account.id, signalType, observedAt: candidate.observedAt, effectiveFrom, effectiveUntil,
+        source: candidate.source, confidence: candidate.confidence, relevance: candidate.relevance,
+        observedSignal, interpretedSignal, evidenceIds: [evidence.evidenceId],
+      };
+      const dedupIdentity = Signal.computeDedupIdentity(props);
+      if (!await this.deps.signalRepository.findByDedupIdentity(signalCtx, dedupIdentity)) {
+        await this.deps.signalRepository.save(signalCtx, Signal.detect(props, this.deps.generateCorrelationId(), this.deps.generateEventId()));
+      }
+    }
+    return this.deps.signalRepository.findActiveByAccount(signalCtx, account.id as string, evaluatedAt);
+  }
+
+  private sanitizeExternalText(value: string): string {
+    return value.replace(/<[^>]*>/g, ' ').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
   private async checkRateLimit(ctx: TenantContext, providerId: string, cost: number): Promise<void> {

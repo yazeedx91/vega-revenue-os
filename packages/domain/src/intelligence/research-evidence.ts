@@ -166,6 +166,10 @@ export class ResearchEvidence {
     return this.props.tenantId;
   }
 
+  get workspaceId(): string {
+    return this.props.workspaceId;
+  }
+
   get confidence(): number {
     return this.props.confidence;
   }

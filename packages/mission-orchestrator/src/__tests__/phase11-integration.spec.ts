@@ -1,6 +1,6 @@
 import type { TenantContext } from '@projectx/domain';
 import { Actor, ICPProfile, Mission } from '@projectx/domain';
-import { asAccountId, asContactId, asCorrelationId, asEventId, asICPProfileId, asICPProfileVersionId, asMissionId, asTenantId, asUserId } from '@projectx/shared';
+import { asAccountId, asContactId, asCorrelationId, asEventId, asICPProfileId, asICPProfileVersionId, asMissionId, asResearchRequestId, asResearchRunId, asTenantId, asUserId } from '@projectx/shared';
 import type { IPlanner, PlanningRequest } from '@projectx/ai-runtime';
 import type { AgentContract, PlanContract } from '@projectx/shared';
 import type { IWorkflowClient } from '@projectx/infrastructure';
@@ -11,6 +11,8 @@ import {
   InMemoryIntelligenceAuditLog,
   InMemoryIntelligenceCache,
   InMemoryLeadRepository,
+  InMemorySignalRepository,
+  InMemoryResearchLifecycleRepository,
   InMemoryProviderRegistry,
   InMemoryRateLimitStore,
   InMemoryResearchEvidenceRepository,
@@ -82,7 +84,9 @@ function createEngine(tenantId: string) {
   const accountRepo = new InMemoryAccountRepository();
   const contactRepo = new InMemoryContactRepository();
   const leadRepo = new InMemoryLeadRepository();
+  const signalRepo = new InMemorySignalRepository();
   const evidenceRepo = new InMemoryResearchEvidenceRepository();
+  const researchLifecycleRepo = new InMemoryResearchLifecycleRepository();
 
   rateLimit.setQuota(tenantId, 'stub-research', 100);
 
@@ -104,7 +108,7 @@ function createEngine(tenantId: string) {
   });
   const contacts = new Map<string, ContactCandidate[]>();
   contacts.set('acc-acme', [
-    { providerContactId: 'con-jane', accountId: 'acc-acme', name: 'Jane Doe', title: 'VP Sales', email: 'jane@acme.com' },
+    { providerContactId: 'con-jane', accountId: 'acc-acme', name: 'Jane Doe', title: 'VP Sales' },
   ]);
   const enriched = new Map<string, EnrichedContact>();
   enriched.set('con-jane', {
@@ -114,7 +118,6 @@ function createEngine(tenantId: string) {
     title: 'VP Sales',
     role: 'decision-maker',
     seniority: 'VP',
-    email: 'jane@acme.com',
     confidence: 0.9,
     validationStatus: 'VALID',
   });
@@ -144,7 +147,9 @@ function createEngine(tenantId: string) {
     accountRepository: accountRepo,
     contactRepository: contactRepo,
     leadRepository: leadRepo,
+    signalRepository: signalRepo,
     evidenceRepository: evidenceRepo,
+    researchLifecycleRepository: researchLifecycleRepo,
     providerRegistry,
     rateLimitStore: rateLimit,
     cache,
@@ -154,6 +159,10 @@ function createEngine(tenantId: string) {
     generateEventId: () => asEventId(generate()),
     generateCorrelationId: () => asCorrelationId(generate()),
     generateEvidenceId: generate,
+    generateRequestId: () => asResearchRequestId(`request-${generate()}`),
+    generateRunId: () => asResearchRunId(`run-${generate()}`),
+    computeQueryHash: (input) => `query-${input.icpProfileId}`,
+    computeEvidenceFingerprint: (input) => `evidence-${input.claimType}-${input.source}`.replace(/[^A-Za-z0-9_-]/g, '_'),
   });
 
   const agentExecutor = new IntelligenceAgentExecutor(researchEngine);
@@ -183,6 +192,10 @@ function createEngine(tenantId: string) {
     approvalService,
     eventBus,
     compensationPort,
+    missionWorkspaceResolver: { resolveAuthorizedWorkspace: async (ctx) => {
+      if (!ctx.userId) throw new Error('authenticated user required');
+      return 'ws-1';
+    } },
     generateEventId: () => asEventId(generate()),
     generateCorrelationId: () => asCorrelationId(generate()),
     generateIdempotencyKey: (hint: string) => hint as any,
@@ -201,6 +214,7 @@ async function seedMissionAndProfile(ctx: TenantContext, deps: ReturnType<typeof
       versionId: asICPProfileVersionId('icp-1-v1'),
       version: 1,
       tenantId: ctx.tenantId,
+      workspaceId: 'ws-1',
       name: 'Manufacturing ICP',
       hardFilters: { industries: ['Manufacturing'], minEmployees: 50, territories: ['US'] },
       softCriteria: [{ criterion: 'uses Dynamics 365', weight: 0.2 }],
@@ -216,7 +230,7 @@ async function seedMissionAndProfile(ctx: TenantContext, deps: ReturnType<typeof
     asEventId('evt-icp'),
   );
   if (!profile.success) throw new Error(profile.error.message);
-  await deps.icpRepo.save(ctx, profile.value);
+  await deps.icpRepo.save({ ...ctx, workspaceId: 'ws-1' }, profile.value);
 
   const mission = Mission.create(
     {
@@ -254,6 +268,7 @@ describe('Phase 11 mission integration', () => {
     const ctx: TenantContext = {
       tenantId,
       correlationId: asCorrelationId('corr-1'),
+      userId: asUserId('owner-1'),
     };
     const deps = createEngine('tenant-1');
     await seedMissionAndProfile(ctx, deps);
@@ -263,7 +278,7 @@ describe('Phase 11 mission integration', () => {
     const mission = await deps.missionRepository.findById(ctx, 'mission-1');
     expect(mission?.status).toBe('COMPLETED');
 
-    const qualified = await deps.leadRepo.findQualified(ctx);
+    const qualified = await deps.leadRepo.findQualified({ ...ctx, workspaceId: 'ws-1' });
     expect(qualified.length).toBeGreaterThanOrEqual(1);
     expect(qualified[0].status).toBe('QUALIFIED');
     expect(qualified[0].scores.overall).toBeGreaterThanOrEqual(0.75);

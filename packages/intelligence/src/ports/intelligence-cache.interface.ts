@@ -8,8 +8,12 @@ export interface CacheEntry<T> {
   queryHash: string;
 }
 
+export interface IntelligenceCacheContext extends TenantContext {
+  readonly workspaceId: string;
+}
+
 export interface IIntelligenceCache {
-  get<T>(ctx: TenantContext, key: string): Promise<CacheEntry<T> | null>;
-  set<T>(ctx: TenantContext, key: string, entry: CacheEntry<T>): Promise<void>;
-  invalidate(ctx: TenantContext, pattern: string): Promise<void>;
+  get<T>(ctx: IntelligenceCacheContext, queryHash: string): Promise<CacheEntry<T> | null>;
+  set<T>(ctx: IntelligenceCacheContext, queryHash: string, entry: CacheEntry<T>): Promise<void>;
+  invalidate(ctx: IntelligenceCacheContext, pattern: string): Promise<void>;
 }
