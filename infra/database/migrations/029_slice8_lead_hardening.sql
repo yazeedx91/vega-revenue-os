@@ -19,10 +19,18 @@ ALTER TABLE intelligence.leads
     ADD COLUMN IF NOT EXISTS evidence_references TEXT[] NOT NULL DEFAULT '{}',
     ADD COLUMN IF NOT EXISTS mission_id TEXT;
 
--- Backfill workspace_id for any pre-existing rows so the NOT NULL constraint can be applied.
 UPDATE intelligence.leads
-    SET workspace_id = '00000000-0000-0000-0000-000000000000'
-    WHERE workspace_id IS NULL;
+    SET workspace_id = (payload ->> 'workspaceId')::UUID
+    WHERE workspace_id IS NULL
+      AND payload ? 'workspaceId'
+      AND payload ->> 'workspaceId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM intelligence.leads WHERE workspace_id IS NULL) THEN
+        RAISE EXCEPTION 'Cannot harden intelligence.leads: existing rows lack a valid workspaceId in payload';
+    END IF;
+END $$;
 
 ALTER TABLE intelligence.leads
     ALTER COLUMN workspace_id SET NOT NULL;

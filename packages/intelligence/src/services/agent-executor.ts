@@ -18,6 +18,10 @@ export class IntelligenceAgentExecutor implements IAgentExecutor {
     try {
       if (taskType === 'execute-research-pipeline') {
         const input = request.context.mission ?? {};
+        const workspaceId = request.context.authorization?.workspaceId;
+        if (typeof workspaceId !== 'string' || workspaceId.length === 0) {
+          throw new Error('Trusted workspace authorization context is required');
+        }
         const summary = await this.engine.run(
           {
             tenantId: request.tenantId,
@@ -27,7 +31,7 @@ export class IntelligenceAgentExecutor implements IAgentExecutor {
           },
           {
             missionId: request.missionId,
-            workspaceId: (input.workspaceId as string) ?? '',
+            workspaceId,
             icpProfileId: (input.icpId as string) ?? '',
             objective: (input.objective as string) ?? '',
             territories: (input.territory as string[]) ?? [],

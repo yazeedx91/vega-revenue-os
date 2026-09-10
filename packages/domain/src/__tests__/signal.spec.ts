@@ -10,6 +10,7 @@ function defaultSignalProps() {
   return {
     id: asSignalId('sig-1'),
     tenantId: tenantId(),
+    workspaceId: 'ws-1',
     accountId: asAccountId('acc-1'),
     signalType: 'Funding' as const,
     observedAt: now,

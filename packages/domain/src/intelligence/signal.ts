@@ -18,10 +18,15 @@ export type SignalCategory = (typeof SIGNAL_CATEGORIES)[number];
 
 export type SignalStatus = 'ACTIVE' | 'EXPIRED' | 'RETRACTED';
 
+export const MAX_SIGNAL_SOURCE_LENGTH = 512;
+export const MAX_SIGNAL_SOURCE_URI_LENGTH = 2048;
+export const MAX_OBSERVED_SIGNAL_LENGTH = 4096;
+export const MAX_INTERPRETED_SIGNAL_LENGTH = 4096;
+
 export interface SignalProps {
   id: SignalId;
   tenantId: TenantId;
-  workspaceId?: string;
+  workspaceId: string;
   accountId: AccountId;
   contactId?: ContactId;
   signalType: SignalCategory;
@@ -48,7 +53,7 @@ export class SignalInvariantError extends Error {
 }
 
 export class Signal extends AggregateRoot<SignalId> {
-  public readonly workspaceId?: string;
+  public readonly workspaceId: string;
   public readonly accountId: AccountId;
   public readonly contactId?: ContactId;
   public readonly signalType: SignalCategory;
@@ -87,8 +92,9 @@ export class Signal extends AggregateRoot<SignalId> {
     this.createdAt = props.createdAt ?? new Date();
   }
 
-  static computeDedupIdentity(props: Pick<SignalProps, 'tenantId' | 'accountId' | 'signalType' | 'observedSignal'>): string {
-    return `${props.tenantId}:${props.accountId}:${props.signalType}:${Signal.hashString(props.observedSignal)}`;
+  static computeDedupIdentity(props: Pick<SignalProps, 'tenantId' | 'workspaceId' | 'accountId' | 'signalType' | 'observedSignal'>): string {
+    const normalizedSignal = props.observedSignal.trim().replace(/\s+/g, ' ').toLowerCase();
+    return `${props.tenantId}:${props.workspaceId}:${props.accountId}:${props.signalType}:${Signal.hashString(normalizedSignal)}`;
   }
 
   private static hashString(input: string): string {
@@ -111,11 +117,26 @@ export class Signal extends AggregateRoot<SignalId> {
     if (props.relevance < 0 || props.relevance > 1) {
       throw new SignalInvariantError('Signal relevance must be between 0 and 1');
     }
-    if (!props.observedSignal || props.observedSignal.trim().length === 0) {
-      throw new SignalInvariantError('observedSignal is required');
+    if (!props.workspaceId) {
+      throw new SignalInvariantError('workspaceId is required');
+    }
+    if (!props.source || props.source.length > MAX_SIGNAL_SOURCE_LENGTH) {
+      throw new SignalInvariantError(`source must be non-empty and at most ${MAX_SIGNAL_SOURCE_LENGTH} characters`);
+    }
+    if (props.sourceUri && props.sourceUri.length > MAX_SIGNAL_SOURCE_URI_LENGTH) {
+      throw new SignalInvariantError(`sourceUri must be at most ${MAX_SIGNAL_SOURCE_URI_LENGTH} characters`);
+    }
+    if (!props.observedSignal || props.observedSignal.trim().length === 0 || props.observedSignal.length > MAX_OBSERVED_SIGNAL_LENGTH) {
+      throw new SignalInvariantError(`observedSignal must be non-empty and at most ${MAX_OBSERVED_SIGNAL_LENGTH} characters`);
+    }
+    if (!props.interpretedSignal || props.interpretedSignal.trim().length === 0 || props.interpretedSignal.length > MAX_INTERPRETED_SIGNAL_LENGTH) {
+      throw new SignalInvariantError(`interpretedSignal must be non-empty and at most ${MAX_INTERPRETED_SIGNAL_LENGTH} characters`);
     }
     if (!SIGNAL_CATEGORIES.includes(props.signalType)) {
       throw new SignalInvariantError(`Invalid signal category: ${props.signalType}`);
+    }
+    if ([props.observedAt, props.effectiveFrom, props.effectiveUntil].some((value) => !(value instanceof Date) || Number.isNaN(value.getTime()))) {
+      throw new SignalInvariantError('Signal timestamps must be valid dates');
     }
     if (props.effectiveUntil.getTime() <= props.effectiveFrom.getTime()) {
       throw new SignalInvariantError('effectiveUntil must be after effectiveFrom');

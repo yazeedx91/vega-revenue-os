@@ -1,4 +1,4 @@
-import type { Account, Contact, ICPProfile, Lead, ResearchEvidence } from '@projectx/domain';
+import type { Account, Contact, ICPProfile, Lead, ResearchEvidence, ResearchRequest, ResearchRun, Signal } from '@projectx/domain';
 import { TenantIsolationError, AuthorizationError } from '@projectx/domain';
 import type {
   AccountRepositoryContext,
@@ -11,6 +11,9 @@ import type {
   IICPProfileRepository,
   ILeadRepository,
   IResearchEvidenceRepository,
+  IResearchLifecycleRepository,
+  ISignalRepository,
+  SignalRepositoryContext,
 } from '@projectx/infrastructure';
 
 export class InMemoryICPProfileRepository implements IICPProfileRepository {
@@ -134,6 +137,60 @@ export class InMemoryLeadRepository implements ILeadRepository {
     return Array.from(this.store.values()).filter(
       (l) => l.tenantId === ctx.tenantId && l.workspaceId === ctx.workspaceId && l.status === 'QUALIFIED',
     );
+  }
+}
+
+export class InMemorySignalRepository implements ISignalRepository {
+  private readonly store = new Map<string, Signal>();
+
+  private key(ctx: SignalRepositoryContext, id: string): string {
+    return `${ctx.tenantId}:${ctx.workspaceId}:${id}`;
+  }
+
+  async findById(ctx: SignalRepositoryContext, id: string): Promise<Signal | null> {
+    return this.store.get(this.key(ctx, id)) ?? null;
+  }
+
+  async findByDedupIdentity(ctx: SignalRepositoryContext, dedupIdentity: string): Promise<Signal | null> {
+    return Array.from(this.store.values()).find(
+      (signal) => signal.tenantId === ctx.tenantId && signal.workspaceId === ctx.workspaceId && signal.dedupIdentity === dedupIdentity,
+    ) ?? null;
+  }
+
+  async save(ctx: SignalRepositoryContext, signal: Signal): Promise<void> {
+    this.store.set(this.key(ctx, signal.id), signal);
+  }
+
+  async findActiveByAccount(ctx: SignalRepositoryContext, accountId: string, evaluatedAt: Date): Promise<Signal[]> {
+    return Array.from(this.store.values()).filter(
+      (signal) => signal.tenantId === ctx.tenantId && signal.workspaceId === ctx.workspaceId
+        && signal.accountId === accountId && signal.isActive(evaluatedAt),
+    );
+  }
+}
+
+export class InMemoryResearchLifecycleRepository implements IResearchLifecycleRepository {
+  private readonly requests = new Map<string, ResearchRequest>();
+  private readonly runs = new Map<string, ResearchRun>();
+
+  private key(ctx: ResearchEvidenceRepositoryContext, id: string): string {
+    return `${ctx.tenantId}:${ctx.workspaceId}:${id}`;
+  }
+
+  async saveRequest(ctx: ResearchEvidenceRepositoryContext, request: ResearchRequest): Promise<void> {
+    this.requests.set(this.key(ctx, request.id), request);
+  }
+
+  async findRequest(ctx: ResearchEvidenceRepositoryContext, requestId: string): Promise<ResearchRequest | null> {
+    return this.requests.get(this.key(ctx, requestId)) ?? null;
+  }
+
+  async saveRun(ctx: ResearchEvidenceRepositoryContext, run: ResearchRun): Promise<void> {
+    this.runs.set(this.key(ctx, run.id), run);
+  }
+
+  async findRun(ctx: ResearchEvidenceRepositoryContext, runId: string): Promise<ResearchRun | null> {
+    return this.runs.get(this.key(ctx, runId)) ?? null;
   }
 }
 

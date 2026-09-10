@@ -1,4 +1,4 @@
-import type { Account, Contact, ICPProfile, Lead, ResearchEvidence } from '@projectx/domain';
+import type { Account, Contact, ICPProfile, Lead, ResearchEvidence, ResearchRequest, ResearchRun, Signal } from '@projectx/domain';
 import type { TenantContext } from '@projectx/domain';
 import type { IRepository } from '@projectx/domain';
 
@@ -44,6 +44,17 @@ export interface ILeadRepository {
   findQualified(ctx: LeadRepositoryContext): Promise<Lead[]>;
 }
 
+export interface SignalRepositoryContext extends TenantContext {
+  readonly workspaceId: string;
+}
+
+export interface ISignalRepository {
+  findById(ctx: SignalRepositoryContext, id: string): Promise<Signal | null>;
+  findByDedupIdentity(ctx: SignalRepositoryContext, dedupIdentity: string): Promise<Signal | null>;
+  save(ctx: SignalRepositoryContext, signal: Signal): Promise<void>;
+  findActiveByAccount(ctx: SignalRepositoryContext, accountId: string, evaluatedAt: Date): Promise<Signal[]>;
+}
+
 export interface ResearchEvidenceRepositoryContext extends TenantContext {
   readonly workspaceId: string;
 }
@@ -55,4 +66,11 @@ export interface IResearchEvidenceRepository {
   findByContact(ctx: ResearchEvidenceRepositoryContext, contactId: string): Promise<ResearchEvidence[]>;
   findByMission(ctx: ResearchEvidenceRepositoryContext, missionId: string): Promise<ResearchEvidence[]>;
   findByFingerprint(ctx: ResearchEvidenceRepositoryContext, fingerprint: string): Promise<ResearchEvidence | null>;
+}
+
+export interface IResearchLifecycleRepository {
+  saveRequest(ctx: ResearchEvidenceRepositoryContext, request: ResearchRequest): Promise<void>;
+  findRequest(ctx: ResearchEvidenceRepositoryContext, requestId: string): Promise<ResearchRequest | null>;
+  saveRun(ctx: ResearchEvidenceRepositoryContext, run: ResearchRun): Promise<void>;
+  findRun(ctx: ResearchEvidenceRepositoryContext, runId: string): Promise<ResearchRun | null>;
 }

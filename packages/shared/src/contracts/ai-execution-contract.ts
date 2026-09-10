@@ -28,6 +28,9 @@ export interface ExecutionContext {
   plan?: Record<string, unknown>;
   target?: Record<string, unknown>;
   constraints?: unknown[];
+  authorization?: {
+    workspaceId: string;
+  };
 }
 
 export interface ExecutionPolicyContext {

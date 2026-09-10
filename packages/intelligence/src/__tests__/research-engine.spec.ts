@@ -9,6 +9,8 @@ import {
   InMemoryIntelligenceAuditLog,
   InMemoryIntelligenceCache,
   InMemoryLeadRepository,
+  InMemorySignalRepository,
+  InMemoryResearchLifecycleRepository,
   InMemoryProviderRegistry,
   InMemoryRateLimitStore,
   InMemoryResearchEvidenceRepository,
@@ -57,7 +59,9 @@ function createEngine() {
   const accountRepo = new InMemoryAccountRepository();
   const contactRepo = new InMemoryContactRepository();
   const leadRepo = new InMemoryLeadRepository();
+  const signalRepo = new InMemorySignalRepository();
   const evidenceRepo = new InMemoryResearchEvidenceRepository();
+  const researchLifecycleRepo = new InMemoryResearchLifecycleRepository();
 
   rateLimit.setQuota('tenant-1', 'stub-research', 100);
 
@@ -92,7 +96,6 @@ function createEngine() {
       name: 'Jane Doe',
       title: 'VP Sales',
       role: 'decision-maker',
-      email: 'jane@acme.com',
     },
   ]);
   const enriched = new Map<string, EnrichedContact>();
@@ -103,7 +106,6 @@ function createEngine() {
     title: 'VP Sales',
     role: 'decision-maker',
     seniority: 'VP',
-    email: 'jane@acme.com',
     confidence: 0.9,
     validationStatus: 'VALID',
   });
@@ -133,7 +135,9 @@ function createEngine() {
     accountRepository: accountRepo,
     contactRepository: contactRepo,
     leadRepository: leadRepo,
+    signalRepository: signalRepo,
     evidenceRepository: evidenceRepo,
+    researchLifecycleRepository: researchLifecycleRepo,
     providerRegistry,
     rateLimitStore: rateLimit,
     cache,
@@ -149,7 +153,7 @@ function createEngine() {
     computeEvidenceFingerprint: (input) => `ef-${input.claimType}-${String(input.normalizedValue).slice(0, 16).replace(/\s/g, '_')}`,
   });
 
-  return { engine, icpRepo, accountRepo, contactRepo, leadRepo, evidenceRepo, eventBus, auditLog };
+  return { engine, icpRepo, accountRepo, contactRepo, leadRepo, signalRepo, evidenceRepo, researchLifecycleRepo, eventBus, auditLog };
 }
 
 async function seedProfile(icpRepo: InMemoryICPProfileRepository): Promise<void> {

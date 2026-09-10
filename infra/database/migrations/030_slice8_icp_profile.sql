@@ -29,10 +29,6 @@ CREATE TABLE intelligence.icp_profiles (
 CREATE INDEX icp_profiles_tenant_workspace_profile_version
     ON intelligence.icp_profiles (tenant_id, workspace_id, icp_profile_id, version_number DESC);
 
-CREATE UNIQUE INDEX icp_profiles_one_active_per_workspace
-    ON intelligence.icp_profiles (tenant_id, workspace_id)
-    WHERE status = 'ACTIVE';
-
 ALTER TABLE intelligence.icp_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE intelligence.icp_profiles FORCE ROW LEVEL SECURITY;
 
