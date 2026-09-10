@@ -29,6 +29,8 @@ class FakeEventBus implements IEventBus {
   }
 }
 
+const WORKSPACE_ID = 'ws-1';
+
 function createContext(): TenantContext {
   return {
     tenantId: asTenantId('tenant-1'),
@@ -37,6 +39,10 @@ function createContext(): TenantContext {
     userId: undefined,
     agentId: undefined,
   };
+}
+
+function createWorkspaceContext(): { tenantId: ReturnType<typeof asTenantId>; correlationId: ReturnType<typeof asCorrelationId>; workspaceId: string } {
+  return { ...createContext(), workspaceId: WORKSPACE_ID };
 }
 
 function createEngine() {
@@ -153,6 +159,7 @@ async function seedProfile(icpRepo: InMemoryICPProfileRepository): Promise<void>
       versionId: asICPProfileVersionId('icp-1-v1'),
       version: 1,
       tenantId: asTenantId('tenant-1'),
+      workspaceId: WORKSPACE_ID,
       name: 'Manufacturing ICP',
       hardFilters: { industries: ['Manufacturing'], minEmployees: 50, territories: ['US'] },
       softCriteria: [{ criterion: 'uses Dynamics 365', weight: 0.2 }],
@@ -168,7 +175,7 @@ async function seedProfile(icpRepo: InMemoryICPProfileRepository): Promise<void>
     asEventId('evt-1'),
   );
   if (!profile.success) throw new Error(profile.error.message);
-  await icpRepo.save(createContext(), profile.value);
+  await icpRepo.save(createWorkspaceContext(), profile.value);
 }
 
 describe('ResearchEngine', () => {
@@ -189,8 +196,8 @@ describe('ResearchEngine', () => {
     expect(result.accountsDiscovered).toBe(2);
     expect(result.contactsDiscovered).toBe(1);
 
-    const qualified = await leadRepo.findQualified(ctx);
-    const allLeads = await leadRepo.findByMission(ctx, 'mission-1');
+    const qualified = await leadRepo.findQualified(createWorkspaceContext());
+    const allLeads = await leadRepo.findByMission(createWorkspaceContext(), 'mission-1');
     if (qualified.length === 0) {
       throw new Error(`No qualified leads. Found ${allLeads.length}: ${JSON.stringify(allLeads.map((l) => ({ status: l.status, scores: l.scores, reason: l.decisionReason })))}`);
     }
@@ -217,7 +224,7 @@ describe('ResearchEngine', () => {
       maxResults: 10,
     });
 
-    const leads = await leadRepo.findByMission(ctx, 'mission-2');
+    const leads = await leadRepo.findByMission(createWorkspaceContext(), 'mission-2');
     const badLead = leads.find((l) => l.accountId === (asAccountId('acc-bad') as string));
     expect(badLead).toBeUndefined();
   });

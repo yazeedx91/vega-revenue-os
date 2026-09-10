@@ -23,6 +23,8 @@ import type {
   IICPProfileRepository,
   ILeadRepository,
   IResearchEvidenceRepository,
+  LeadRepositoryContext,
+  ResearchEvidenceRepositoryContext,
 } from '@projectx/infrastructure';
 import type { IIntelligenceAuditLog } from '../ports/intelligence-audit-log.interface';
 import type { IIntelligenceCache } from '../ports/intelligence-cache.interface';
@@ -80,7 +82,8 @@ export class ResearchEngine {
   constructor(private readonly deps: ResearchEngineDependencies) {}
 
   async run(ctx: TenantContext, request: ResearchRunRequest): Promise<ResearchRunResult> {
-    const profile = await this.deps.icpProfileRepository.findById(ctx, request.icpProfileId);
+    const profileCtx = { ...ctx, workspaceId: request.workspaceId };
+    const profile = await this.deps.icpProfileRepository.findById(profileCtx, request.icpProfileId);
     if (!profile) {
       throw new Error(`ICP profile ${request.icpProfileId} not found`);
     }
@@ -138,8 +141,9 @@ export class ResearchEngine {
         }
       }
 
-      summary.leadsQualified = (await this.deps.leadRepository.findQualified(ctx)).length;
-      summary.leadsNeedReview = (await this.deps.leadRepository.findByMission(ctx, request.missionId)).filter(
+      const leadCtx = { ...ctx, workspaceId: request.workspaceId };
+      summary.leadsQualified = (await this.deps.leadRepository.findQualified(leadCtx)).length;
+      summary.leadsNeedReview = (await this.deps.leadRepository.findByMission(leadCtx, request.missionId)).filter(
         (l) => l.status === 'NEEDS_REVIEW',
       ).length;
 
@@ -225,10 +229,11 @@ export class ResearchEngine {
     }
 
     const intelligence = await this.getCompanyIntelligence(ctx, provider, candidate.providerAccountId);
+    const evidenceCtx = { ...ctx, workspaceId };
     const evidenceIds: string[] = [];
     for (const claim of this.extractAccountClaims(candidate, intelligence)) {
       const evidence = this.createEvidence(ctx, claim, candidate.providerAccountId, workspaceId, requestId, runId);
-      await this.deps.evidenceRepository.save(ctx, evidence);
+      await this.deps.evidenceRepository.save(evidenceCtx, evidence);
       evidenceIds.push(evidence.evidenceId as string);
     }
 
@@ -343,7 +348,8 @@ export class ResearchEngine {
         requestId,
         runId,
       );
-      await this.deps.evidenceRepository.save(ctx, evidence);
+      const evidenceCtx: ResearchEvidenceRepositoryContext = { ...ctx, workspaceId: account.workspaceId };
+      await this.deps.evidenceRepository.save(evidenceCtx, evidence);
 
       const contact = Contact.discover(
         {
@@ -413,7 +419,8 @@ export class ResearchEngine {
     const icpResult = new ICPScorer().score(account, profile);
     const signalScore = new SignalScorer().score(signals.map((s) => ({ relevance: s.relevance, confidence: s.confidence })));
 
-    const evidence = await this.deps.evidenceRepository.findByAccount(ctx, account.id as string);
+    const evidenceCtx: ResearchEvidenceRepositoryContext = { ...ctx, workspaceId: account.workspaceId };
+    const evidence = await this.deps.evidenceRepository.findByAccount(evidenceCtx, account.id as string);
     const evidenceConfidence = computeEvidenceConfidence(
       evidence.map((e) => ({ confidence: e.confidence, isFresh: e.isFresh() })),
     );
@@ -464,7 +471,8 @@ export class ResearchEngine {
       this.deps.generateEventId(),
     );
 
-    await this.deps.leadRepository.save(ctx, lead);
+    const leadCtx: LeadRepositoryContext = { ...ctx, workspaceId: account.workspaceId };
+    await this.deps.leadRepository.save(leadCtx, lead);
     await this.publishEvents(lead);
   }
 

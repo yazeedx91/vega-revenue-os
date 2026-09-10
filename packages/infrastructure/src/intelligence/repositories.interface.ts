@@ -2,13 +2,25 @@ import type { Account, Contact, ICPProfile, Lead, ResearchEvidence } from '@proj
 import type { TenantContext } from '@projectx/domain';
 import type { IRepository } from '@projectx/domain';
 
-export interface IICPProfileRepository extends IRepository<ICPProfile, string> {}
+export interface ICPProfileRepositoryContext extends TenantContext {
+  readonly workspaceId: string;
+}
+
+export interface IICPProfileRepository {
+  findById(ctx: ICPProfileRepositoryContext, id: string): Promise<ICPProfile | null>;
+  save(ctx: ICPProfileRepositoryContext, aggregate: ICPProfile): Promise<void>;
+  findActiveByWorkspace(ctx: ICPProfileRepositoryContext): Promise<ICPProfile | null>;
+}
 
 export interface AccountRepositoryContext extends TenantContext {
   readonly workspaceId: string;
 }
 
 export interface ContactRepositoryContext extends TenantContext {
+  readonly workspaceId: string;
+}
+
+export interface LeadRepositoryContext extends TenantContext {
   readonly workspaceId: string;
 }
 
@@ -24,15 +36,22 @@ export interface IContactRepository {
   findByAccount(ctx: ContactRepositoryContext, accountId: string): Promise<Contact[]>;
 }
 
-export interface ILeadRepository extends IRepository<Lead, string> {
-  findByMission(ctx: TenantContext, missionId: string): Promise<Lead[]>;
-  findQualified(ctx: TenantContext): Promise<Lead[]>;
+export interface ILeadRepository {
+  findById(ctx: LeadRepositoryContext, id: string): Promise<Lead | null>;
+  save(ctx: LeadRepositoryContext, lead: Lead): Promise<void>;
+  findByMission(ctx: LeadRepositoryContext, missionId: string): Promise<Lead[]>;
+  findQualified(ctx: LeadRepositoryContext): Promise<Lead[]>;
+}
+
+export interface ResearchEvidenceRepositoryContext extends TenantContext {
+  readonly workspaceId: string;
 }
 
 export interface IResearchEvidenceRepository {
-  save(ctx: TenantContext, evidence: ResearchEvidence): Promise<void>;
-  findById(ctx: TenantContext, id: string): Promise<ResearchEvidence | null>;
-  findByAccount(ctx: TenantContext, accountId: string): Promise<ResearchEvidence[]>;
-  findByContact(ctx: TenantContext, contactId: string): Promise<ResearchEvidence[]>;
-  findByMission(ctx: TenantContext, missionId: string): Promise<ResearchEvidence[]>;
+  save(ctx: ResearchEvidenceRepositoryContext, evidence: ResearchEvidence): Promise<void>;
+  findById(ctx: ResearchEvidenceRepositoryContext, id: string): Promise<ResearchEvidence | null>;
+  findByAccount(ctx: ResearchEvidenceRepositoryContext, accountId: string): Promise<ResearchEvidence[]>;
+  findByContact(ctx: ResearchEvidenceRepositoryContext, contactId: string): Promise<ResearchEvidence[]>;
+  findByMission(ctx: ResearchEvidenceRepositoryContext, missionId: string): Promise<ResearchEvidence[]>;
+  findByFingerprint(ctx: ResearchEvidenceRepositoryContext, fingerprint: string): Promise<ResearchEvidence | null>;
 }
