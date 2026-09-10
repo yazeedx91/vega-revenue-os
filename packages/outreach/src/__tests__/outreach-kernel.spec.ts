@@ -12,6 +12,8 @@ import {
   asLeadId,
   asOutreachMessageId,
   asSequenceId,
+  asResearchRequestId,
+  asResearchRunId,
   asTenantId,
 } from '@projectx/shared';
 import { InMemoryAuditLog, InMemoryIdempotencyStore, InMemoryRateLimiter } from '@projectx/infrastructure';
@@ -66,15 +68,19 @@ describe('Outreach Execution Kernel', () => {
     new ResearchEvidence({
       evidenceId: asEvidenceId(id),
       tenantId,
+      workspaceId: '00000000-0000-4000-8000-000000000001',
+      requestId: asResearchRequestId(`request-${id}`),
+      runId: asResearchRunId(`run-${id}`),
       claimType: 'funding-round',
       normalizedValue: 'raised Series B',
       source: 'test',
       reliabilityTier: 'PUBLIC_RECORD',
-      observedAt: new Date(),
-      freshnessExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      observedAt: new Date().toISOString(),
+      freshnessExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       confidence: 0.9,
       confidenceBreakdown: { sourceReliability: 0.9, extractionConfidence: 0.9, corroboration: 0.9 },
       provenance: [],
+      evidenceFingerprint: `fingerprint-${id}`,
     });
 
   const fakeReasoningEngine: IReasoningEngine = {

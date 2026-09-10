@@ -12,6 +12,8 @@ import {
   asLeadId,
   asOutreachMessageId,
   asSequenceId,
+  asResearchRequestId,
+  asResearchRunId,
   asTenantId,
 } from '@projectx/shared';
 import { OutreachExecutionService } from '../application/outreach-execution.service';
@@ -184,15 +186,19 @@ describe('OutreachExecutionService production idempotency hardening', () => {
       new ResearchEvidence({
         evidenceId: asEvidenceId('ev-1'),
         tenantId: tenantA,
+        workspaceId: '00000000-0000-4000-8000-000000000001',
+        requestId: asResearchRequestId('request-ev-1'),
+        runId: asResearchRunId('run-ev-1'),
         claimType: 'funding-round',
         normalizedValue: 'raised Series B',
         source: 'test',
         reliabilityTier: 'PUBLIC_RECORD',
-        observedAt: new Date(),
-        freshnessExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        observedAt: new Date().toISOString(),
+        freshnessExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         confidence: 0.9,
         confidenceBreakdown: { sourceReliability: 0.9, extractionConfidence: 0.9, corroboration: 0.9 },
         provenance: [],
+        evidenceFingerprint: 'fingerprint-ev-1',
       }),
     ];
 
