@@ -2,6 +2,8 @@ import type { CorrelationId, TenantId } from '@projectx/shared';
 
 export interface MissionWorkflowInput {
   tenantId: TenantId;
+  workspaceId: string;
+  userId: string;
   missionId: string;
   correlationId: CorrelationId;
 }

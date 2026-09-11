@@ -103,7 +103,7 @@ describe('PostgreSQL integration acceptance', () => {
 
   it('sets tenant context as a parameter and defends against SQL injection', async () => {
     if (!pool) return;
-    const malicious = "tenant-1'; DROP TABLE outreach.campaigns; --";
+    const malicious = "tenant-1'; DROP TABLE public.acceptance_occ; --";
     const logs: string[] = [];
     await client.withTenant(ctx(malicious), async (db) => {
       const result = await db.query(`SELECT current_setting('app.current_tenant', TRUE) AS tenant`);
@@ -147,15 +147,15 @@ describe('PostgreSQL integration acceptance', () => {
     await expect(
       client.transaction(ctx('tenant-tx'), async (db) => {
         await db.query(
-          `INSERT INTO outreach.campaigns (tenant_id, id, payload, version) VALUES ($1, $2, $3, $4)`,
-          ['tenant-tx', id, JSON.stringify({ id, tenantId: 'tenant-tx', status: 'draft' }), 0],
+          `INSERT INTO idempotency.keys (tenant_id, key, scope, status, expires_at) VALUES ($1, $2, 'rollback-proof', 'PENDING', NOW() + interval '1 hour')`,
+          ['tenant-tx', id],
         );
         throw new Error('forced failure');
       }),
     ).rejects.toThrow('forced failure');
 
     const found = await client.withTenant(ctx('tenant-tx'), async (db) =>
-      db.query(`SELECT 1 FROM outreach.campaigns WHERE id = $1`, [id]),
+      db.query(`SELECT 1 FROM idempotency.keys WHERE key = $1`, [id]),
     );
     expect(found.rowCount).toBe(0);
   });
@@ -195,16 +195,18 @@ describe('PostgreSQL integration acceptance', () => {
     if (!pool) return;
     const id = `occ-${Date.now()}`;
     const initialPayload = JSON.stringify({ id, tenantId: 'tenant-occ', status: 'draft' });
+    await adminPool.query('CREATE TABLE IF NOT EXISTS public.acceptance_occ (tenant_id TEXT NOT NULL, id TEXT PRIMARY KEY, payload JSONB NOT NULL, version INT NOT NULL)');
+    await adminPool.query('GRANT SELECT, INSERT, UPDATE, DELETE ON public.acceptance_occ TO projectx_app');
     await client.withTenant(ctx('tenant-occ'), async (db) => {
       await db.query(
-        `INSERT INTO outreach.campaigns (tenant_id, id, payload, version) VALUES ($1, $2, $3, $4)`,
+        `INSERT INTO public.acceptance_occ (tenant_id, id, payload, version) VALUES ($1, $2, $3, $4)`,
         ['tenant-occ', id, initialPayload, 0],
       );
     });
 
     const tx1 = client.transaction(ctx('tenant-occ'), async (db) => {
       const result = await db.query(
-        `UPDATE outreach.campaigns SET payload = payload || $1, version = 1 WHERE tenant_id = $2 AND id = $3 AND version = 0`,
+        `UPDATE public.acceptance_occ SET payload = payload || $1, version = 1 WHERE tenant_id = $2 AND id = $3 AND version = 0`,
         [JSON.stringify({ status: 'active' }), 'tenant-occ', id],
       );
       if (result.rowCount === 0) {
@@ -214,7 +216,7 @@ describe('PostgreSQL integration acceptance', () => {
 
     const tx2 = client.transaction(ctx('tenant-occ'), async (db) => {
       const result = await db.query(
-        `UPDATE outreach.campaigns SET payload = payload || $1, version = 1 WHERE tenant_id = $2 AND id = $3 AND version = 0`,
+        `UPDATE public.acceptance_occ SET payload = payload || $1, version = 1 WHERE tenant_id = $2 AND id = $3 AND version = 0`,
         [JSON.stringify({ status: 'archived' }), 'tenant-occ', id],
       );
       if (result.rowCount === 0) {
@@ -225,7 +227,7 @@ describe('PostgreSQL integration acceptance', () => {
     await expect(Promise.all([tx1, tx2])).rejects.toThrow();
 
     const finalVersion = await client.withTenant(ctx('tenant-occ'), async (db) => {
-      return db.query(`SELECT version FROM outreach.campaigns WHERE tenant_id = $1 AND id = $2`, ['tenant-occ', id]);
+      return db.query(`SELECT version FROM public.acceptance_occ WHERE tenant_id = $1 AND id = $2`, ['tenant-occ', id]);
     });
     expect(finalVersion.rows[0].version).toBe(1);
   });
@@ -235,18 +237,23 @@ describe('PostgreSQL integration acceptance', () => {
     const tenantA = `tenant-mission-a-${randomUUID()}`;
     const tenantB = `tenant-mission-b-${randomUUID()}`;
     const id = randomUUID();
+    const ownerId = randomUUID();
+    const workspaceId = randomUUID();
+    await adminPool.query('INSERT INTO identity.users(id,email,tenant_id) VALUES($1,$2,$3)', [ownerId, `${ownerId}@example.test`, tenantA]);
+    await adminPool.query('INSERT INTO identity.workspaces(id,tenant_id,name,owner_user_id) VALUES($1,$2,$3,$4)', [workspaceId, tenantA, 'Mission workspace', ownerId]);
 
     await client.withTenant(ctx(tenantA), async (db) => {
       await db.query(
         `INSERT INTO mission.missions
-         (id, tenant_id, owner_user_id, name, objective, icp_id, territory, channels,
+         (id, tenant_id, workspace_id, workspace_binding_state, owner_user_id, name, objective, icp_id, territory, channels,
           budget, autonomy_level, constraints, success_criteria, status,
           current_plan_version, outcomes, version)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+         VALUES ($1, $2, $3, 'WORKSPACE_BOUND', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
         [
           id,
           tenantA,
-          randomUUID(),
+          workspaceId,
+          ownerId,
           'Mission A',
           'objective A',
           'icp-1',

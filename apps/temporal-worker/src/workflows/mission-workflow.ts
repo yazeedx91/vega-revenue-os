@@ -34,6 +34,8 @@ const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'ARCHIVED
 export async function MissionWorkflow(input: MissionWorkflowInput): Promise<void> {
   const ctx: TenantContext = {
     tenantId: input.tenantId,
+    workspaceId: input.workspaceId,
+    userId: input.userId,
     correlationId: input.correlationId as string,
   };
 

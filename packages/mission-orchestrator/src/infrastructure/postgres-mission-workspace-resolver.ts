@@ -11,23 +11,22 @@ export class PostgresMissionWorkspaceResolver implements IMissionWorkspaceResolv
   }
 
   async resolveAuthorizedWorkspace(ctx: TenantContext, missionId: string): Promise<string> {
-    if (!ctx.userId) {
-      throw new MissionWorkspaceResolutionError('Authenticated user is required to resolve mission workspace');
+    if (!ctx.userId || !ctx.workspaceId) {
+      throw new MissionWorkspaceResolutionError('Authenticated user and workspace are required to resolve mission workspace');
     }
 
     const result = await this.client.withTenant(ctx, (client: PoolClient) => client.query(
-      `SELECT DISTINCT ip.workspace_id
+      `SELECT m.workspace_id
        FROM mission.missions m
-       JOIN intelligence.icp_profiles ip
-         ON ip.tenant_id = m.tenant_id AND ip.icp_profile_id = m.icp_id
-       JOIN identity.workspaces w
-         ON w.tenant_id = ip.tenant_id AND w.id = ip.workspace_id
        JOIN identity.memberships membership
-         ON membership.tenant_id = w.tenant_id
-        AND membership.workspace_id = w.id
+         ON membership.tenant_id = m.tenant_id
+        AND membership.workspace_id = m.workspace_id
         AND membership.user_id = $3::UUID
-       WHERE m.tenant_id = $1 AND m.id = $2::UUID`,
-      [ctx.tenantId, missionId, ctx.userId],
+       WHERE m.tenant_id = $1
+         AND m.id = $2::UUID
+         AND m.workspace_id = $4::UUID
+         AND m.workspace_binding_state = 'WORKSPACE_BOUND'`,
+      [ctx.tenantId, missionId, ctx.userId, ctx.workspaceId],
     ));
 
     if (result.rows.length !== 1) {

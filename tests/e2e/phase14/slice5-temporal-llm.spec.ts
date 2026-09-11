@@ -346,8 +346,13 @@ describe('Slice 5 Temporal -> LLM E2E (real production chain)', () => {
     const missionId = asMissionId(randomUUID());
     const correlationId = asCorrelationId(`corr-slice5-temporal-${runId}`);
     const operatorId = asUserId(randomUUID());
+    const workspaceId = randomUUID();
+    await adminPool.query('INSERT INTO identity.users(id,email,tenant_id) VALUES($1,$2,$3)', [operatorId, `${operatorId}@example.test`, tenantId]);
+    await adminPool.query('INSERT INTO identity.workspaces(id,tenant_id,name,owner_user_id) VALUES($1,$2,$3,$4)', [workspaceId, tenantId, 'Slice 5', operatorId]);
+    await adminPool.query("INSERT INTO identity.memberships(workspace_id,tenant_id,user_id,role) VALUES($1,$2,$3,'OPERATOR')", [workspaceId, tenantId, operatorId]);
     const ctx: CommandContext = {
       tenantId,
+      workspaceId,
       actor: Actor.human(operatorId, tenantId),
       correlationId,
     };

@@ -20,6 +20,7 @@ import {
   createExecutionService,
   createTenantContext,
   requireEnv,
+  recipientFromSequence,
   runMigrations,
   seedTenantAllowlist,
 } from './helpers';
@@ -98,7 +99,7 @@ describe('Phase 14 P0-1 PostgreSQL multi-worker idempotency concurrency', () => 
 
     const campaign = buildCampaign(tenantId, `campaign-${randomUUID()}`);
     const sequence = buildSequence(tenantId, campaign.id as string, `sequence-${randomUUID()}`);
-    const recipientAddress = sequence.recipient.address;
+    const recipientAddress = recipientFromSequence(sequence).address;
 
     await adapters.campaignRepository.save(ctx, campaign);
     await adapters.sequenceRepository.save(ctx, sequence);
@@ -106,7 +107,7 @@ describe('Phase 14 P0-1 PostgreSQL multi-worker idempotency concurrency', () => 
 
     const lead = buildLead(tenantId);
     const evidence = [buildEvidence(tenantId)];
-    const plan = buildPlan(campaign.id as string, sequence.id as string, sequence.recipient);
+    const plan = buildPlan(campaign.id as string, sequence.id as string, recipientFromSequence(sequence));
 
     const draft = await service.prepareDraft(ctx, sequence.id as any, plan, lead, evidence);
     expect(draft.status).toBe('AWAITING_APPROVAL');
@@ -126,6 +127,8 @@ describe('Phase 14 P0-1 PostgreSQL multi-worker idempotency concurrency', () => 
       {
         id: approvalId as any,
         tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        workspaceBindingState: 'WORKSPACE_BOUND',
         missionId: 'mission-e2e',
         sequenceId: sequence.id as string,
         executionId: executionId as string,
@@ -145,7 +148,7 @@ describe('Phase 14 P0-1 PostgreSQL multi-worker idempotency concurrency', () => 
     );
     if (!approval.success) throw new Error(approval.error.message);
     approval.value.approve('e2e-operator' as any, 'Approved', asCorrelationId('corr-approve'), asEventId('evt-approve'));
-    await approvalRepo.save(approval.value);
+    await approvalRepo.save(ctx, approval.value);
 
     return { ctx, campaign, sequence, executionId, approvalId, idempotencyKey, recipientAddress };
   }

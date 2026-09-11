@@ -1,7 +1,7 @@
 import type { ISecretsProvider } from '@projectx/infrastructure';
 import { ContactChannelProtector } from '../services/contact-channel-protector';
 import { HistoricalRecipientFingerprint, OutboundRecipientRecovery } from '../services/outbound-recipient-recovery';
-import { RecipientEncryptionKeyResolver, RecipientHmacKeyResolver } from '../services/protected-channel-keyring';
+import { RecipientEncryptionKeyResolver } from '../services/protected-channel-keyring';
 
 class Secrets implements ISecretsProvider {
   readonly reads: string[] = [];
@@ -24,7 +24,7 @@ describe('rotation-aware outbound recipient recovery',()=>{
     const v1=new ContactChannelProtector(new Secrets(values('v1')));
     const protectedV1=await v1.protectEmail('tenant-a',' User@Example.com ');
     const rotated=new Secrets(values('v2'));
-    const recovery=new OutboundRecipientRecovery(new RecipientEncryptionKeyResolver(rotated));
+    const recovery=new OutboundRecipientRecovery(rotated);
     await expect(recovery.recoverEmailForSend('tenant-a',protectedV1.ciphertext!)).resolves.toBe('user@example.com');
     const protectedV2=await new ContactChannelProtector(rotated).protectEmail('tenant-a','user@example.com');
     expect(protectedV2.ciphertext).toMatch(/^e1\.v2\./);
@@ -33,8 +33,8 @@ describe('rotation-aware outbound recipient recovery',()=>{
   it('fails closed for missing historical key and wrong tenant',async()=>{
     const protectedV1=await new ContactChannelProtector(new Secrets(values('v1'))).protectEmail('tenant-a','user@example.com');
     const missing={...values('v2')}; delete (missing as any)['projectx/contact-channel/encryption-keys/v1'];
-    await expect(new OutboundRecipientRecovery(new RecipientEncryptionKeyResolver(new Secrets(missing))).recoverEmailForSend('tenant-a',protectedV1.ciphertext!)).rejects.toThrow();
-    await expect(new OutboundRecipientRecovery(new RecipientEncryptionKeyResolver(new Secrets(values('v2')))).recoverEmailForSend('tenant-b',protectedV1.ciphertext!)).rejects.toThrow();
+    await expect(new OutboundRecipientRecovery(new Secrets(missing)).recoverEmailForSend('tenant-a',protectedV1.ciphertext!)).rejects.toThrow();
+    await expect(new OutboundRecipientRecovery(new Secrets(values('v2'))).recoverEmailForSend('tenant-b',protectedV1.ciphertext!)).rejects.toThrow();
   });
 
   it('rejects path-like versions before secret lookup',async()=>{
@@ -45,7 +45,7 @@ describe('rotation-aware outbound recipient recovery',()=>{
 
   it('computes retained historical HMAC fingerprints after rotation',async()=>{
     const secrets=new Secrets(values('v2'));
-    const historical=new HistoricalRecipientFingerprint(new RecipientHmacKeyResolver(secrets));
+    const historical=new HistoricalRecipientFingerprint(secrets);
     const a=await historical.fingerprintEmailForVersion('tenant-a',' User@Example.com ','v1');
     const b=await historical.fingerprintEmailForVersion('tenant-a','user@example.com','v1');
     const other=await historical.fingerprintEmailForVersion('tenant-b','user@example.com','v1');

@@ -45,7 +45,7 @@ import {
 } from './helpers';
 import { getAdminDatabaseUrl, getAppDatabaseUrl } from './integration-config';
 import { WorkflowClient } from '@temporalio/client';
-import { NativeConnection, Worker } from '@temporalio/worker';
+import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import {
   setKnowledgeIngestionService,
   ingestKnowledgeActivity,
@@ -1293,9 +1293,11 @@ describe('A36/A37: Temporal knowledge ingestion workflows', () => {
   }, 60_000);
 
   afterAll(async () => {
-    temporalWorker?.shutdown();
+    await temporalWorker?.shutdown();
     if (temporalWorkerRun) await temporalWorkerRun;
     await temporalConnection?.close();
+    await Runtime.instance().shutdown();
+    await new Promise((resolve) => setTimeout(resolve, 100));
     delete (globalThis as any).__a36FailMode;
 
     // Restore the real ingestion service for any later tests.

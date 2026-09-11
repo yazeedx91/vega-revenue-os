@@ -21,6 +21,7 @@ module.exports = {
     '^@projectx/specialist-agents$': '<rootDir>/packages/specialist-agents/src',
   },
   transform: {
+    '^.+\.m?js$': ['babel-jest', { presets: [['@babel/preset-env', { targets: { node: 'current' } }]] }],
     '^.+\.tsx?$': [
       'ts-jest',
       {
@@ -32,6 +33,7 @@ module.exports = {
       },
     ],
   },
+  transformIgnorePatterns: ['/node_modules/(?!.*(?:htmlparser2|entities|domhandler|domelementtype|domutils|dom-serializer)/)'],
   collectCoverageFrom: ['<rootDir>/(packages|apps)/*/src/**/*.ts', '!<rootDir>/**/*.spec.ts'],
   coverageDirectory: '<rootDir>/coverage',
   clearMocks: true,

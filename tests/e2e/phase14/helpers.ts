@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Pool } from 'pg';
 import { createClient, type RedisClientType } from 'redis';
 import { Connection } from '@temporalio/client';
@@ -36,6 +37,8 @@ import {
   asLeadId,
   asOutreachExecutionId,
   asOutreachMessageId,
+  asResearchRequestId,
+  asResearchRunId,
   asSequenceId,
   asTenantId,
   asUserId,
@@ -104,16 +107,50 @@ export async function connectTemporal(address = getTemporalAddress()): Promise<C
   return Connection.connect({ address: `127.0.0.1:${port}` });
 }
 
+function tenantSuffix(tenantId: string): string { return createHash('sha256').update(tenantId).digest('hex').slice(0, 12); }
+export function workspaceForTenant(tenantId: string): string {
+  const hex = createHash('sha256').update(`workspace:${tenantId}`).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+function accountForTenant(tenantId: string): string { return `account-e2e-${tenantSuffix(tenantId)}`; }
+function contactForTenant(tenantId: string): string { return `contact-e2e-${tenantSuffix(tenantId)}`; }
+function protectedTestRecipient(address: string) {
+  const canonical = address.trim().toLowerCase();
+  const encoded = Buffer.from(canonical).toString('base64url');
+  return { fingerprint: `h1.v1.${encoded}`, ciphertext: `e1.v1.${encoded}` };
+}
+
+export async function seedOutreachOwnership(admin: Pool, tenantId: string, leadId: string, contactId: string, fingerprint?: string, ciphertext?: string): Promise<void> {
+  const workspaceId = workspaceForTenant(tenantId);
+  const ownerHex = createHash('sha256').update(`owner:${tenantId}`).digest('hex');
+  const ownerId = `${ownerHex.slice(0, 8)}-${ownerHex.slice(8, 12)}-4${ownerHex.slice(13, 16)}-8${ownerHex.slice(17, 20)}-${ownerHex.slice(20, 32)}`;
+  const accountId = accountForTenant(tenantId);
+  await admin.query('INSERT INTO identity.users(id,email,tenant_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [ownerId, `${ownerId}@example.test`, tenantId]);
+  await admin.query('INSERT INTO identity.workspaces(id,tenant_id,name,owner_user_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [workspaceId, tenantId, 'E2E workspace', ownerId]);
+  await admin.query('INSERT INTO intelligence.accounts(account_id,tenant_id,workspace_id,name) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [accountId, tenantId, workspaceId, 'E2E account']);
+  await admin.query("INSERT INTO intelligence.contacts(contact_id,tenant_id,workspace_id,account_id,email_fingerprint,encrypted_email,status,verification_state) VALUES($1,$2,$3,$4,$5,$6,'VALIDATED','VERIFIED') ON CONFLICT DO NOTHING", [contactId, tenantId, workspaceId, accountId, fingerprint ?? null, ciphertext ?? null]);
+  await admin.query("INSERT INTO intelligence.leads(tenant_id,id,payload,workspace_id,account_id,contact_id,status) VALUES($1,$2,$3,$4,$5,$6,'QUALIFIED') ON CONFLICT DO NOTHING", [tenantId, leadId, JSON.stringify({ workspaceId }), workspaceId, accountId, contactId]);
+}
+
+class E2ECampaignRepository extends PostgresCampaignRepository {
+  constructor(config: { pool: Pool }, private readonly admin: Pool) { super(config); }
+  async save(ctx: any, entity: OutreachCampaign): Promise<void> { await seedOutreachOwnership(this.admin, String(ctx.tenantId), String(entity.leadId), String(entity.contactId), entity.recipientFingerprint); return super.save(ctx, entity); }
+}
+class E2ESequenceRepository extends PostgresSequenceRepository {
+  constructor(config: { pool: Pool }, private readonly admin: Pool) { super(config); }
+  async save(ctx: any, entity: OutreachSequence): Promise<void> { await seedOutreachOwnership(this.admin, String(ctx.tenantId), String(entity.leadId), String(entity.contactId), entity.recipientFingerprint, entity.recipientCiphertext); return super.save(ctx, entity); }
+}
+
 export async function createDurableAdapters(): Promise<DurableAdapters> {
-  const [pool, redis] = await Promise.all([connectPostgres(), connectRedis()]);
+  const [pool, adminPool, redis] = await Promise.all([connectPostgres(), connectPostgres(getAdminDatabaseUrl()), connectRedis()]);
   const auditLog = new PostgresAuditLog({ pool });
   const idempotencyStore = new PostgresIdempotencyStore({ pool });
   const rateLimiter = new RedisRateLimiter(redis);
   return {
     pool,
     redis,
-    campaignRepository: new PostgresCampaignRepository({ pool }),
-    sequenceRepository: new PostgresSequenceRepository({ pool }),
+    campaignRepository: new E2ECampaignRepository({ pool }, adminPool),
+    sequenceRepository: new E2ESequenceRepository({ pool }, adminPool),
     executionRepository: new PostgresMessageExecutionRepository({ pool }),
     allowlistRepository: new PostgresRecipientAllowlistRepository({ pool }),
     suppressionRepository: new PostgresSuppressionRepository({ pool }),
@@ -122,6 +159,7 @@ export async function createDurableAdapters(): Promise<DurableAdapters> {
     rateLimiter,
     async dispose() {
       await pool.end();
+      await adminPool.end();
       await redis.disconnect();
     },
   };
@@ -130,6 +168,7 @@ export async function createDurableAdapters(): Promise<DurableAdapters> {
 export function createTenantContext(tenantId: string, actor?: { id: string; role: string }): TenantContext {
   return {
     tenantId: asTenantId(tenantId),
+    workspaceId: workspaceForTenant(tenantId),
     correlationId: asCorrelationId(`e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`),
     ...(actor ? { actor } : {}),
   } as TenantContext;
@@ -200,6 +239,8 @@ export function createExecutionService(
       schedulePolicy: new InMemorySequenceSchedulePolicy(),
       personalizationService,
       safetyGate,
+      recipientRecovery: { recoverEmailForSend: async (_tenantId: string, value: string) => Buffer.from(value.split('.')[2] ?? '', 'base64url').toString('utf8') },
+      historicalRecipientFingerprint: { fingerprintEmailForVersion: async (_tenantId: string, address: string, version: string) => `h1.${version}.${Buffer.from(address.trim().toLowerCase()).toString('base64url')}` },
       idempotencyStore: adapters.idempotencyStore,
       generateExecutionId: () => `exec-e2e-${Date.now()}`,
       generateEventId: () => asEventId(`evt-e2e-${Date.now()}`),
@@ -212,11 +253,12 @@ export function createExecutionService(
 export function buildCampaign(tenantId: string, campaignId?: string, recipientAddress?: string): OutreachCampaign {
   const id = campaignId ?? `campaign-e2e-${Date.now()}`;
   const recipient: Recipient = {
-    contactId: asContactId('contact-e2e'),
+    contactId: asContactId(contactForTenant(tenantId)),
     channel: 'email',
     address: recipientAddress ?? 'lead@example.com',
     name: 'E2E Lead',
   };
+  const protectedRecipient = protectedTestRecipient(recipient.address);
   const step: SequenceStep = {
     stepNumber: 1,
     channel: 'email',
@@ -227,9 +269,12 @@ export function buildCampaign(tenantId: string, campaignId?: string, recipientAd
   const campaign = OutreachCampaign.create(
     {
       tenantId: asTenantId(tenantId),
+      workspaceId: workspaceForTenant(tenantId),
       id: asCampaignId(id),
       leadId: asLeadId('lead-e2e'),
-      recipient,
+      contactId: recipient.contactId,
+      recipientFingerprint: protectedRecipient.fingerprint,
+      recipientProtectionState: 'PROTECTED',
       channel: 'email',
       steps: [step],
       budget: { maxSendCount: 10, maxCostUsd: 5 },
@@ -254,11 +299,12 @@ export function buildCampaign(tenantId: string, campaignId?: string, recipientAd
 export function buildSequence(tenantId: string, campaignId: string, sequenceId?: string, recipientAddress?: string): OutreachSequence {
   const id = sequenceId ?? `sequence-e2e-${Date.now()}`;
   const recipient: Recipient = {
-    contactId: asContactId('contact-e2e'),
+    contactId: asContactId(contactForTenant(tenantId)),
     channel: 'email',
     address: recipientAddress ?? 'lead@example.com',
     name: 'E2E Lead',
   };
+  const protectedRecipient = protectedTestRecipient(recipient.address);
   const step: SequenceStep = {
     stepNumber: 1,
     channel: 'email',
@@ -269,10 +315,14 @@ export function buildSequence(tenantId: string, campaignId: string, sequenceId?:
   const sequence = OutreachSequence.create(
     {
       tenantId: asTenantId(tenantId),
+      workspaceId: workspaceForTenant(tenantId),
       id: asSequenceId(id),
       campaignId: asCampaignId(campaignId),
       leadId: asLeadId('lead-e2e'),
-      recipient,
+      contactId: recipient.contactId,
+      recipientFingerprint: protectedRecipient.fingerprint,
+      recipientCiphertext: protectedRecipient.ciphertext,
+      recipientProtectionState: 'PROTECTED',
       steps: [step],
     },
     asCorrelationId('corr-e2e'),
@@ -296,14 +346,19 @@ export function buildLead(tenantId: string): Lead {
   return {
     id: asLeadId('lead-e2e'),
     tenantId: asTenantId(tenantId),
-    accountId: asAccountId('account-e2e'),
-    contactId: asContactId('contact-e2e'),
+    accountId: asAccountId(accountForTenant(tenantId)),
+    contactId: asContactId(contactForTenant(tenantId)),
     icpProfileId: asICPProfileId('icp-e2e'),
     scores: { icpMatch: 0.9, signalScore: 0.8, intentScore: 0.7, evidenceConfidence: 0.9, overall: 0.85 },
     status: 'QUALIFIED',
     decisionReason: 'E2E lead',
     evidenceReferences: [asEvidenceId('evidence-e2e')],
   } as unknown as Lead;
+}
+
+export function recipientFromSequence(sequence: OutreachSequence): Recipient {
+  const address = Buffer.from((sequence.recipientCiphertext ?? '').split('.')[2] ?? '', 'base64url').toString('utf8');
+  return { contactId: asContactId(sequence.contactId), channel: 'email', address, name: 'E2E Lead' };
 }
 
 export function buildPlan(campaignId: string, sequenceId: string, recipient: Recipient): OutreachPlan {
@@ -332,15 +387,19 @@ export function buildEvidence(tenantId: string): ResearchEvidence {
   return new (require('@projectx/domain').ResearchEvidence)({
     evidenceId: asEvidenceId('evidence-e2e'),
     tenantId: asTenantId(tenantId),
+    workspaceId: workspaceForTenant(tenantId),
+    requestId: asResearchRequestId('request-e2e'),
+    runId: asResearchRunId('run-e2e'),
     claimType: 'stub',
     normalizedValue: 'E2E evidence',
     source: 'e2e-stub',
     reliabilityTier: 'USER_PROVIDED',
-    observedAt: now,
-    freshnessExpiry: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    observedAt: now.toISOString(),
+    freshnessExpiry: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
     confidence: 0.9,
     confidenceBreakdown: { sourceReliability: 0.9, extractionConfidence: 0.9, corroboration: 0.9 },
     provenance: [],
+    evidenceFingerprint: 'evidence_e2e_fingerprint',
   });
 }
 

@@ -19,6 +19,7 @@ import {
   createExecutionService,
   createTenantContext,
   requireEnv,
+  recipientFromSequence,
   runMigrations,
   seedTenantAllowlist,
 } from './helpers';
@@ -55,7 +56,7 @@ describe('Phase 14.7c deterministic outreach lifecycle', () => {
 
       const campaign = buildCampaign(tenantId);
       const sequence = buildSequence(tenantId, campaign.id as string);
-      const recipientAddress = sequence.recipient.address;
+      const recipientAddress = recipientFromSequence(sequence).address;
 
       await adapters.campaignRepository.save(ctx, campaign);
       await adapters.sequenceRepository.save(ctx, sequence);
@@ -63,7 +64,7 @@ describe('Phase 14.7c deterministic outreach lifecycle', () => {
 
       const lead = buildLead(tenantId);
       const evidence = [buildEvidence(tenantId)];
-      const plan = buildPlan(campaign.id as string, sequence.id as string, sequence.recipient);
+      const plan = buildPlan(campaign.id as string, sequence.id as string, recipientFromSequence(sequence));
 
       const draft = await service.prepareDraft(ctx, sequence.id as string, plan, lead, evidence);
       expect(draft.status).toBe('AWAITING_APPROVAL');
@@ -79,6 +80,8 @@ describe('Phase 14.7c deterministic outreach lifecycle', () => {
         {
           id: approvalId as any,
           tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          workspaceBindingState: 'WORKSPACE_BOUND',
           missionId: 'mission-e2e',
           sequenceId: sequence.id as string,
           executionId: executionId as string,
@@ -98,7 +101,7 @@ describe('Phase 14.7c deterministic outreach lifecycle', () => {
       );
       if (!approval.success) throw new Error(approval.error.message);
       approval.value.approve('e2e-operator' as any, 'Approved', asCorrelationId('corr-approve'), asEventId('evt-approve'));
-      await approvalRepo.save(approval.value);
+      await approvalRepo.save(ctx, approval.value);
 
       const sendResult = await service.executeApprovedSend(ctx, executionId, approvalId as any);
       expect(sendResult.status).toBe('COMPLETED');
@@ -158,7 +161,7 @@ describe('Phase 14.7c deterministic outreach lifecycle', () => {
 
       const lead = buildLead(tenantId);
       const evidence = [buildEvidence(tenantId)];
-      const plan = buildPlan(campaign.id as string, sequence.id as string, sequence.recipient);
+      const plan = buildPlan(campaign.id as string, sequence.id as string, recipientFromSequence(sequence));
 
       const draft = await service.prepareDraft(ctx, sequence.id as string, plan, lead, evidence);
       expect(draft.status).toBe('AWAITING_APPROVAL');
@@ -192,7 +195,7 @@ describe('Phase 14.7c deterministic outreach lifecycle', () => {
 
       const lead = buildLead(tenantId);
       const evidence = [buildEvidence(tenantId)];
-      const plan = buildPlan(campaign.id as string, sequence.id as string, sequence.recipient);
+      const plan = buildPlan(campaign.id as string, sequence.id as string, recipientFromSequence(sequence));
 
       const draft = await service.prepareDraft(ctx, sequence.id as string, plan, lead, evidence);
       if (draft.status !== 'AWAITING_APPROVAL') {

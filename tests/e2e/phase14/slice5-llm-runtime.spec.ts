@@ -52,6 +52,7 @@ import type {
 import { connectPostgres, runMigrations, DEFAULT_APP_DATABASE_URL } from './helpers';
 
 const TENANT_A = 'tenant-a';
+const WORKSPACE_A = '90000000-0000-4000-8000-000000000001';
 const TENANT_B = 'tenant-b';
 
 /** Valid structured reasoning payload satisfying the output validator. */
@@ -479,7 +480,7 @@ describe('Slice 5 LLM Runtime E2E (real adapters + local HTTP mock)', () => {
   });
 
   const ctxFor = (tenantId: string, correlationId: string): TenantContext =>
-    ({ tenantId: asTenantId(tenantId), correlationId: correlationId as CorrelationId }) as TenantContext;
+    ({ tenantId: asTenantId(tenantId), workspaceId: WORKSPACE_A, correlationId: correlationId as CorrelationId }) as TenantContext;
 
   it('cross-provider fallback: openai HTTP 500 -> anthropic success, two attempt rows share one llm_call_id', async () => {
     mock.script.openai = { status: 500 };
@@ -544,14 +545,22 @@ describe('Slice 5 LLM Runtime E2E (real adapters + local HTTP mock)', () => {
 
     // Seed a real APPROVED approval bound to this executionId + idempotencyKey.
     const ctx = ctxFor(TENANT_A, request.correlationId as unknown as string);
+    const ownerId = randomUUID();
+    const boundMissionId = randomUUID();
     await postgresClient.withTenant(ctx, async (client) => {
+      await client.query('INSERT INTO identity.users(id,email,tenant_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [ownerId, `${ownerId}@example.test`, TENANT_A]);
+      await client.query('INSERT INTO identity.workspaces(id,tenant_id,name,owner_user_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [WORKSPACE_A, TENANT_A, 'LLM E2E', ownerId]);
+      await client.query("INSERT INTO mission.missions(id,tenant_id,workspace_id,workspace_binding_state,owner_user_id,name,objective,icp_id,status) VALUES($1,$2,$3,'WORKSPACE_BOUND',$4,'LLM approval','approval binding','icp','DRAFT')", [boundMissionId, TENANT_A, WORKSPACE_A, ownerId]);
       await client.query(
-        `INSERT INTO mission.approvals (tenant_id, id, payload)
-         VALUES ($1, $2, $3::jsonb)`,
+        `INSERT INTO mission.approvals (tenant_id, workspace_id, workspace_binding_state, mission_id, id, payload)
+         VALUES ($1, $2, 'WORKSPACE_BOUND', $3, $4, $5::jsonb)`,
         [
           TENANT_A,
+          WORKSPACE_A,
+          boundMissionId,
           `approval-${request.executionId}`,
           JSON.stringify({
+            missionId: boundMissionId,
             executionId: request.executionId,
             idempotencyKey: request.idempotencyKey as unknown as string,
             status: 'APPROVED',

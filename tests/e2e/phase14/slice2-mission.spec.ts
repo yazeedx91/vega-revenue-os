@@ -274,6 +274,12 @@ describe('Slice 2 canonical mission E2E', () => {
     );
   }
 
+  async function seedWorkspace(tenantId: string, workspaceId: string, userId: string): Promise<void> {
+    await adminPool!.query('INSERT INTO identity.users(id,email,tenant_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [userId, `${userId}@example.test`, tenantId]);
+    await adminPool!.query('INSERT INTO identity.workspaces(id,tenant_id,name,owner_user_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [workspaceId, tenantId, 'Slice 2', userId]);
+    await adminPool!.query("INSERT INTO identity.memberships(workspace_id,tenant_id,user_id,role) VALUES($1,$2,$3,'OPERATOR') ON CONFLICT DO NOTHING", [workspaceId, tenantId, userId]);
+  }
+
   async function cleanupControlPlaneFixtures(adminPool: Pool): Promise<void> {
     if (controlPlaneSeeds.agent) {
       await adminPool.query(
@@ -346,8 +352,11 @@ describe('Slice 2 canonical mission E2E', () => {
     const missionId = asMissionId(randomUUID());
     const correlationId = asCorrelationId(`corr-slice2-${runId}`);
     const operatorId = asUserId(randomUUID());
+    const workspaceId = randomUUID();
+    await seedWorkspace(tenantId, workspaceId, operatorId);
     const ctx = {
       tenantId,
+      workspaceId,
       actor: Actor.human(operatorId, tenantId),
       correlationId,
     };
@@ -433,8 +442,11 @@ describe('Slice 2 canonical mission E2E', () => {
     const missionId = asMissionId(randomUUID());
     const correlationId = asCorrelationId(`corr-slice2-pause-${runId}`);
     const operatorId = asUserId(randomUUID());
+    const workspaceId = randomUUID();
+    await seedWorkspace(tenantId, workspaceId, operatorId);
     const ctx = {
       tenantId,
+      workspaceId,
       actor: Actor.human(operatorId, tenantId),
       correlationId,
     };
@@ -525,8 +537,11 @@ describe('Slice 2 canonical mission E2E', () => {
     const missionId = asMissionId(randomUUID());
     const correlationId = asCorrelationId(`corr-slice2-replan-${runId}`);
     const operatorId = asUserId(randomUUID());
+    const workspaceId = randomUUID();
+    await seedWorkspace(tenantId, workspaceId, operatorId);
     const ctx = {
       tenantId,
+      workspaceId,
       actor: Actor.human(operatorId, tenantId),
       correlationId,
     };
@@ -589,8 +604,11 @@ describe('Slice 2 canonical mission E2E', () => {
     const missionId = asMissionId(randomUUID());
     const correlationId = asCorrelationId(`corr-slice2-cancel-${runId}`);
     const operatorId = asUserId(randomUUID());
+    const workspaceId = randomUUID();
+    await seedWorkspace(tenantId, workspaceId, operatorId);
     const ctx = {
       tenantId,
+      workspaceId,
       actor: Actor.human(operatorId, tenantId),
       correlationId,
     };
@@ -615,7 +633,7 @@ describe('Slice 2 canonical mission E2E', () => {
       connection: nativeConnection,
       taskQueue,
       workflowsPath: require.resolve('../../../apps/temporal-worker/src/workflows/mission-workflow'),
-      activities,
+      activities: { ...activities, executeMissionStepActivity: async () => ({ missionId: missionId as string, status: 'EXECUTING' }) },
     });
     const workerRun = worker.run().catch(() => {});
 
