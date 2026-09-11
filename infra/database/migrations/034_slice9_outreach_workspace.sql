@@ -7,17 +7,26 @@
 -- LEGACY_UNAVAILABLE; no synthetic addresses are generated.
 
 ALTER TABLE outreach.campaigns
+  ADD COLUMN IF NOT EXISTS lead_id TEXT,
+  ADD COLUMN IF NOT EXISTS workspace_id UUID,
   ADD COLUMN IF NOT EXISTS contact_id TEXT,
   ADD COLUMN IF NOT EXISTS recipient_fingerprint TEXT,
   ADD COLUMN IF NOT EXISTS recipient_protection_state TEXT;
 
 ALTER TABLE outreach.sequences
+  ADD COLUMN IF NOT EXISTS campaign_id TEXT,
+  ADD COLUMN IF NOT EXISTS lead_id TEXT,
+  ADD COLUMN IF NOT EXISTS workspace_id UUID,
   ADD COLUMN IF NOT EXISTS contact_id TEXT,
   ADD COLUMN IF NOT EXISTS recipient_fingerprint TEXT,
   ADD COLUMN IF NOT EXISTS recipient_ciphertext TEXT,
   ADD COLUMN IF NOT EXISTS recipient_protection_state TEXT;
 
 ALTER TABLE outreach.message_executions
+  ADD COLUMN IF NOT EXISTS campaign_id TEXT,
+  ADD COLUMN IF NOT EXISTS sequence_id TEXT,
+  ADD COLUMN IF NOT EXISTS lead_id TEXT,
+  ADD COLUMN IF NOT EXISTS workspace_id UUID,
   ADD COLUMN IF NOT EXISTS contact_id TEXT,
   ADD COLUMN IF NOT EXISTS recipient_fingerprint TEXT,
   ADD COLUMN IF NOT EXISTS recipient_ciphertext TEXT,
@@ -98,16 +107,24 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- Ensure referenced ownership targets are unique on the composite keys
+-- used by the workspace-scoped FKs below.
+CREATE UNIQUE INDEX IF NOT EXISTS leads_tenant_workspace_id_unique
+  ON intelligence.leads (tenant_id, workspace_id, id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS contacts_tenant_workspace_id_unique
+  ON intelligence.contacts (tenant_id, workspace_id, contact_id);
+
 ALTER TABLE outreach.campaigns
   ADD CONSTRAINT campaigns_protection_state_check CHECK (recipient_protection_state IN ('PROTECTED', 'LEGACY_UNAVAILABLE')),
   ADD CONSTRAINT campaigns_protected_fingerprint_check CHECK (recipient_protection_state <> 'PROTECTED' OR recipient_fingerprint IS NOT NULL),
   ADD CONSTRAINT campaigns_legacy_no_fingerprint_check CHECK (recipient_protection_state <> 'LEGACY_UNAVAILABLE' OR recipient_fingerprint IS NULL),
   ADD CONSTRAINT campaigns_tenant_workspace_id_unique UNIQUE (tenant_id, workspace_id, id),
   ADD CONSTRAINT campaigns_workspace_lead_fk FOREIGN KEY (tenant_id, workspace_id, lead_id) REFERENCES intelligence.leads (tenant_id, workspace_id, id),
-  ADD CONSTRAINT campaigns_workspace_contact_fk FOREIGN KEY (tenant_id, workspace_id, contact_id) REFERENCES intelligence.contacts (tenant_id, workspace_id, id),
-  ALTER COLUMN contact_id SET NOT NULL,
+  ADD CONSTRAINT campaigns_workspace_contact_fk FOREIGN KEY (tenant_id, workspace_id, contact_id) REFERENCES intelligence.contacts (tenant_id, workspace_id, contact_id),
   ALTER COLUMN lead_id SET NOT NULL,
   ALTER COLUMN workspace_id SET NOT NULL,
+  ALTER COLUMN contact_id SET NOT NULL,
   ALTER COLUMN recipient_protection_state SET NOT NULL;
 
 ALTER TABLE outreach.sequences
@@ -117,7 +134,7 @@ ALTER TABLE outreach.sequences
   ADD CONSTRAINT sequences_tenant_workspace_id_unique UNIQUE (tenant_id, workspace_id, id),
   ADD CONSTRAINT sequences_workspace_campaign_fk FOREIGN KEY (tenant_id, workspace_id, campaign_id) REFERENCES outreach.campaigns (tenant_id, workspace_id, id),
   ADD CONSTRAINT sequences_workspace_lead_fk FOREIGN KEY (tenant_id, workspace_id, lead_id) REFERENCES intelligence.leads (tenant_id, workspace_id, id),
-  ADD CONSTRAINT sequences_workspace_contact_fk FOREIGN KEY (tenant_id, workspace_id, contact_id) REFERENCES intelligence.contacts (tenant_id, workspace_id, id),
+  ADD CONSTRAINT sequences_workspace_contact_fk FOREIGN KEY (tenant_id, workspace_id, contact_id) REFERENCES intelligence.contacts (tenant_id, workspace_id, contact_id),
   ALTER COLUMN campaign_id SET NOT NULL,
   ALTER COLUMN lead_id SET NOT NULL,
   ALTER COLUMN workspace_id SET NOT NULL,
@@ -132,7 +149,7 @@ ALTER TABLE outreach.message_executions
   ADD CONSTRAINT executions_workspace_campaign_fk FOREIGN KEY (tenant_id, workspace_id, campaign_id) REFERENCES outreach.campaigns (tenant_id, workspace_id, id),
   ADD CONSTRAINT executions_workspace_sequence_fk FOREIGN KEY (tenant_id, workspace_id, sequence_id) REFERENCES outreach.sequences (tenant_id, workspace_id, id),
   ADD CONSTRAINT executions_workspace_lead_fk FOREIGN KEY (tenant_id, workspace_id, lead_id) REFERENCES intelligence.leads (tenant_id, workspace_id, id),
-  ADD CONSTRAINT executions_workspace_contact_fk FOREIGN KEY (tenant_id, workspace_id, contact_id) REFERENCES intelligence.contacts (tenant_id, workspace_id, id),
+  ADD CONSTRAINT executions_workspace_contact_fk FOREIGN KEY (tenant_id, workspace_id, contact_id) REFERENCES intelligence.contacts (tenant_id, workspace_id, contact_id),
   ALTER COLUMN campaign_id SET NOT NULL,
   ALTER COLUMN sequence_id SET NOT NULL,
   ALTER COLUMN lead_id SET NOT NULL,
