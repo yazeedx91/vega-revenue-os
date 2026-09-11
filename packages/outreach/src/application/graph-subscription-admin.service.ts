@@ -17,6 +17,7 @@ export interface GraphSubscriptionAdminServiceConfig {
 
 export interface CreateGraphSubscriptionAdminRequest {
   readonly ctx: TenantContext;
+  readonly workspaceId: string;
   readonly resource: string;
   readonly notificationUrl: string;
   readonly expirationDateTime: Date;
@@ -57,6 +58,8 @@ export class GraphSubscriptionAdminService {
 
     const record: CreateGraphSubscriptionRecord = {
       tenantId: request.ctx.tenantId as string,
+      workspaceId: request.workspaceId,
+      subscriptionScope: 'WORKSPACE_BOUND',
       subscriptionId: clientResult.value.id,
       resource: clientResult.value.resource,
       notificationUrl: clientResult.value.notificationUrl,
