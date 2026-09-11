@@ -6,6 +6,7 @@ import { AdminApiKeyGuard } from './admin-api-key.guard';
 
 class CreateSubscriptionDto {
   tenantId!: string;
+  workspaceId!: string;
   resource!: string;
   notificationUrl!: string;
   expirationDateTime!: string;
@@ -27,7 +28,8 @@ export class AdminGraphSubscriptionController {
   @Post()
   async create(@Body() dto: CreateSubscriptionDto) {
     const result = await this.adminService.create({
-      ctx: this.ctx(dto.tenantId),
+      ctx: { ...this.ctx(dto.tenantId), workspaceId: dto.workspaceId },
+      workspaceId: dto.workspaceId,
       resource: dto.resource,
       notificationUrl: dto.notificationUrl,
       expirationDateTime: new Date(dto.expirationDateTime),

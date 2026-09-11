@@ -44,6 +44,7 @@ import {
   PostgresTenantEmailConfigRepository,
   StubGraphInboundMessageFetcher,
 } from '@projectx/outreach';
+import { HistoricalRecipientFingerprint } from '@projectx/application';
 import { TemporalSignalDispatcher } from '@projectx/temporal-client';
 import { randomUUID } from 'crypto';
 import { GraphEmailWebhookController } from './graph-email-webhook.controller';
@@ -149,7 +150,10 @@ function createTelemetry(): ITelemetry {
           subscriptionRepository,
           messageFetcher,
           normalizer: new GraphMessageNormalizer(),
-          correlator: new GraphReplyCorrelator({ messageExecutionRepository }),
+          correlator: new GraphReplyCorrelator({
+            messageExecutionRepository,
+            historicalRecipientFingerprint: new HistoricalRecipientFingerprint(secrets),
+          }),
           idempotencyStore: pool
             ? new PostgresIdempotencyStore({ pool })
             : new InMemoryIdempotencyStore(),
