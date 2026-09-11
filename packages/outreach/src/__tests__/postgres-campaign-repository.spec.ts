@@ -6,15 +6,18 @@ import { PostgresCampaignRepository } from '../infrastructure/postgres-campaign-
 
 describe('PostgresCampaignRepository', () => {
   const tenantId = asTenantId('tenant-1');
-  const ctx = { tenantId, correlationId: asCorrelationId('corr-1') };
+  const ctx = { tenantId, workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
 
   function makeCampaign() {
     return OutreachCampaign.create(
       {
         id: asCampaignId('camp-1'),
         tenantId,
+        workspaceId: 'workspace-1',
         leadId: 'lead-1' as any,
-        recipient: { contactId: 'c1' as any, channel: 'email', address: 'a@b.com' },
+        contactId: 'c1',
+        recipientFingerprint: 'h1.1.fingerprint123',
+        recipientProtectionState: 'PROTECTED',
         channel: 'email',
         steps: [{ stepNumber: 1, channel: 'email', delayMs: 0, requiresApproval: true, objective: 'first-touch' }],
         missionId: 'm-1',

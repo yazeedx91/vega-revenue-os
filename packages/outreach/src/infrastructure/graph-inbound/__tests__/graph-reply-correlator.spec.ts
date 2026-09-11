@@ -11,7 +11,7 @@ function nextId(prefix: string): string {
   return `${prefix}-${idCounter}`;
 }
 
-const ctx: TenantContext = { tenantId: asTenantId('tenant-a'), correlationId: asCorrelationId('corr-1') };
+const ctx: TenantContext = { tenantId: asTenantId('tenant-a'), workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
 
 function makeNormalized(overrides: Partial<GraphNormalizedReply> = {}): GraphNormalizedReply {
   return {
@@ -28,17 +28,21 @@ function makeNormalized(overrides: Partial<GraphNormalizedReply> = {}): GraphNor
 
 async function seedExecution(
   repo: InMemoryMessageExecutionRepository,
-  overrides: { recipientAddress?: string; providerMessageId?: string; idempotencyKeySuffix?: string } = {},
+  overrides: { recipientFingerprint?: string; providerMessageId?: string; idempotencyKeySuffix?: string } = {},
 ) {
   const execution = OutreachMessageExecution.create(
     {
       id: asOutreachExecutionId(nextId('exec')),
       tenantId: ctx.tenantId,
+      workspaceId: 'workspace-1',
       campaignId: asCampaignId('camp-1'),
       sequenceId: asSequenceId('seq-1'),
       stepNumber: 1,
       leadId: 'lead-1',
-      recipientAddress: overrides.recipientAddress ?? 'prospect@example.com',
+      contactId: 'contact-1',
+      recipientFingerprint: overrides.recipientFingerprint ?? 'h1.1.fingerprint123',
+      recipientCiphertext: 'e1.1.ciphertext456',
+      recipientProtectionState: 'PROTECTED',
       channel: 'email',
       idempotencyKey: asIdempotencyKey(`idmp-${overrides.idempotencyKeySuffix ?? nextId('idmp')}`),
     },
@@ -120,27 +124,28 @@ describe('GraphReplyCorrelator', () => {
     expect(result.matchedBy).toBe('PROVIDER_MESSAGE_ID');
   });
 
-  it('falls back to sender/recipient correlation when there is exactly one candidate', async () => {
+  it('returns NOT_CORRELATED for sender/recipient fallback until workspace-bound subscription is implemented', async () => {
     const repo = new InMemoryMessageExecutionRepository();
-    await seedExecution(repo, { recipientAddress: 'prospect@example.com' });
+    await seedExecution(repo, { recipientFingerprint: 'h1.1.prospect' });
     const correlator = new GraphReplyCorrelator({ messageExecutionRepository: repo });
 
     const result = await correlator.correlate(ctx, makeNormalized({ sender: 'prospect@example.com' }));
 
-    expect(result.status).toBe('CORRELATED');
-    if (result.status !== 'CORRELATED') return;
-    expect(result.matchedBy).toBe('SENDER_RECIPIENT_FALLBACK');
+    expect(result.status).toBe('NOT_CORRELATED');
+    if (result.status === 'NOT_CORRELATED') {
+      expect(result.reason).toContain('Protected recipient fallback requires an authenticated workspace-bound subscription');
+    }
   });
 
-  it('returns AMBIGUOUS rather than guessing when multiple non-terminal candidates share a sender', async () => {
+  it('returns NOT_CORRELATED rather than guessing when multiple candidates share a sender until workspace-bound subscription is implemented', async () => {
     const repo = new InMemoryMessageExecutionRepository();
-    await seedExecution(repo, { recipientAddress: 'prospect@example.com', idempotencyKeySuffix: '1' });
-    await seedExecution(repo, { recipientAddress: 'prospect@example.com', idempotencyKeySuffix: '2' });
+    await seedExecution(repo, { recipientFingerprint: 'h1.1.prospect', idempotencyKeySuffix: '1' });
+    await seedExecution(repo, { recipientFingerprint: 'h1.1.prospect', idempotencyKeySuffix: '2' });
     const correlator = new GraphReplyCorrelator({ messageExecutionRepository: repo });
 
     const result = await correlator.correlate(ctx, makeNormalized({ sender: 'prospect@example.com' }));
 
-    expect(result.status).toBe('AMBIGUOUS');
+    expect(result.status).toBe('NOT_CORRELATED');
   });
 
   it('returns NOT_CORRELATED when no candidate exists for the sender', async () => {
@@ -154,7 +159,7 @@ describe('GraphReplyCorrelator', () => {
 
   it('does not use the sender/recipient fallback when disabled by policy', async () => {
     const repo = new InMemoryMessageExecutionRepository();
-    await seedExecution(repo, { recipientAddress: 'prospect@example.com' });
+    await seedExecution(repo, { recipientFingerprint: 'h1.1.prospect' });
     const correlator = new GraphReplyCorrelator({ messageExecutionRepository: repo, allowSenderRecipientFallback: false });
 
     const result = await correlator.correlate(ctx, makeNormalized({ sender: 'prospect@example.com' }));
@@ -164,15 +169,19 @@ describe('GraphReplyCorrelator', () => {
 
   it('never guesses across tenants: a same-sender execution in another tenant is invisible', async () => {
     const repo = new InMemoryMessageExecutionRepository();
-    const otherCtx: TenantContext = { tenantId: asTenantId('tenant-b'), correlationId: asCorrelationId('corr-2') };
+    const otherCtx: TenantContext = { tenantId: asTenantId('tenant-b'), workspaceId: 'workspace-2', correlationId: asCorrelationId('corr-2') };
     const execution = OutreachMessageExecution.create(
       {
         tenantId: otherCtx.tenantId,
+        workspaceId: 'workspace-2',
         campaignId: asCampaignId('camp-2'),
         sequenceId: asSequenceId('seq-2'),
         stepNumber: 1,
         leadId: 'lead-2',
-        recipientAddress: 'prospect@example.com',
+        contactId: 'contact-2',
+        recipientFingerprint: 'h1.1.prospect',
+        recipientCiphertext: 'e1.1.ciphertext',
+        recipientProtectionState: 'PROTECTED',
         channel: 'email',
         idempotencyKey: asIdempotencyKey('idmp-other-tenant'),
       },

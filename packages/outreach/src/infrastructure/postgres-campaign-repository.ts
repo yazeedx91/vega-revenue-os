@@ -1,83 +1,12 @@
 import type { Pool } from 'pg';
-import { OutreachCampaign } from '@projectx/domain';
-import { ensureSameTenant, type TenantContext } from '@projectx/domain';
-import type { CampaignBudget, CampaignStatus } from '@projectx/domain';
-import type { OutreachChannel } from '@projectx/domain';
-import type { Recipient } from '@projectx/domain';
-import type { SequenceStep } from '@projectx/domain';
+import { AuthorizationError, OutreachCampaign, TenantIsolationError } from '@projectx/domain';
+import type { CampaignBudget, CampaignStatus, OutreachChannel, RecipientProtectionState, SequenceStep } from '@projectx/domain';
 import type { CampaignId, LeadId, TenantId } from '@projectx/shared';
-import { PostgresRepository, toDate } from '@projectx/infrastructure';
-import type { ICampaignRepository } from '../ports/outreach-repository.interface';
+import { ConcurrencyConflictError, PostgresClient, toDate } from '@projectx/infrastructure';
+import type { ICampaignRepository, OutreachRepositoryContext } from '../ports/outreach-repository.interface';
 
-export interface PostgresCampaignRepositoryConfig {
-  pool: Pool;
-}
-
-export class PostgresCampaignRepository implements ICampaignRepository {
-  private readonly repository: PostgresRepository<OutreachCampaign, CampaignSnapshot, CampaignId>;
-
-  constructor(config: PostgresCampaignRepositoryConfig) {
-    this.repository = new PostgresRepository<OutreachCampaign, CampaignSnapshot, CampaignId>(
-      { pool: config.pool, tableName: 'outreach.campaigns' },
-      {
-        toSnapshot: (entity) => ({
-          id: entity.id,
-          tenantId: entity.tenantId,
-          missionId: entity.missionId,
-          leadId: entity.leadId,
-          recipient: entity.recipient,
-          channel: entity.channel,
-          steps: entity.steps,
-          budget: entity.budget,
-          status: entity.status,
-          sentCount: entity.sentCount,
-          spentCostUsd: entity.spentCostUsd,
-          createdAt: entity.createdAt,
-          updatedAt: entity.updatedAt,
-        }),
-        fromSnapshot: (snapshot, id, tenantId, version) =>
-          OutreachCampaign.reconstitute(
-            {
-              ...snapshot,
-              id,
-              tenantId: tenantId as TenantId,
-              leadId: snapshot.leadId as LeadId,
-              recipient: snapshot.recipient as Recipient,
-              channel: snapshot.channel as OutreachChannel,
-              steps: snapshot.steps as SequenceStep[],
-              budget: snapshot.budget as CampaignBudget | undefined,
-              status: snapshot.status as CampaignStatus,
-              createdAt: toDate(snapshot.createdAt),
-              updatedAt: toDate(snapshot.updatedAt),
-            },
-            version,
-          ),
-      },
-    );
-  }
-
-  async save(ctx: TenantContext, campaign: OutreachCampaign): Promise<void> {
-    ensureSameTenant(ctx, campaign.tenantId);
-    await this.repository.save(ctx, campaign);
-  }
-
-  async load(ctx: TenantContext, campaignId: CampaignId): Promise<OutreachCampaign | null> {
-    return this.repository.findById(ctx, campaignId);
-  }
-}
-
-type CampaignSnapshot = {
-  id?: CampaignId;
-  tenantId?: string & { readonly __brand: 'TenantId' };
-  missionId?: string;
-  leadId: string;
-  recipient: unknown;
-  channel: string;
-  steps: unknown[];
-  budget?: unknown;
-  status: string;
-  sentCount: number;
-  spentCostUsd: number;
-  createdAt: Date;
-  updatedAt: Date;
-};
+type CampaignSnapshot = { id?: CampaignId; tenantId?: TenantId; workspaceId: string; missionId?: string; leadId: string; contactId: string; channel: string; steps: unknown[]; budget?: unknown; status: string; sentCount: number; spentCostUsd: number; createdAt: Date; updatedAt: Date };
+function snapshot(e: OutreachCampaign): CampaignSnapshot { return { id:e.id,tenantId:e.tenantId,workspaceId:e.workspaceId,missionId:e.missionId,leadId:e.leadId,contactId:e.contactId,channel:e.channel,steps:e.steps,budget:e.budget,status:e.status,sentCount:e.sentCount,spentCostUsd:e.spentCostUsd,createdAt:e.createdAt,updatedAt:e.updatedAt }; }
+function restore(r:any):OutreachCampaign { const s=r.payload as CampaignSnapshot; return OutreachCampaign.reconstitute({...s,id:r.id,tenantId:r.tenant_id as TenantId,workspaceId:r.workspace_id,leadId:r.lead_id as LeadId,contactId:r.contact_id,recipientFingerprint:r.recipient_fingerprint??undefined,recipientProtectionState:r.recipient_protection_state as RecipientProtectionState,channel:s.channel as OutreachChannel,steps:s.steps as SequenceStep[],budget:s.budget as CampaignBudget,status:s.status as CampaignStatus,createdAt:toDate(s.createdAt),updatedAt:toDate(s.updatedAt)},r.version); }
+export interface PostgresCampaignRepositoryConfig{pool:Pool}
+export class PostgresCampaignRepository implements ICampaignRepository{private readonly db:PostgresClient;constructor(c:PostgresCampaignRepositoryConfig){this.db=new PostgresClient(c.pool);}async load(ctx:OutreachRepositoryContext,id:CampaignId){return this.db.withTenant(ctx,async c=>{const r=await c.query('SELECT * FROM outreach.campaigns WHERE tenant_id=$1 AND workspace_id=$2 AND id=$3',[ctx.tenantId,ctx.workspaceId,id]);return r.rows[0]?restore(r.rows[0]):null;});}async save(ctx:OutreachRepositoryContext,e:OutreachCampaign){if(e.tenantId!==ctx.tenantId)throw new TenantIsolationError('Campaign tenant mismatch');if(e.workspaceId!==ctx.workspaceId)throw new AuthorizationError('Campaign workspace mismatch');const p=JSON.stringify(snapshot(e));await this.db.withTenant(ctx,async c=>{if(e.loadedVersion===undefined){const r=await c.query('INSERT INTO outreach.campaigns (tenant_id,workspace_id,id,lead_id,contact_id,recipient_fingerprint,recipient_protection_state,payload,version,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) ON CONFLICT DO NOTHING RETURNING id',[ctx.tenantId,ctx.workspaceId,e.id,e.leadId,e.contactId,e.recipientFingerprint??null,e.recipientProtectionState,p,e.version]);if(!r.rowCount)throw new ConcurrencyConflictError('Campaign already exists',String(ctx.tenantId),String(e.id),undefined);}else{const r=await c.query('UPDATE outreach.campaigns SET payload=$4,version=$5,updated_at=NOW() WHERE tenant_id=$1 AND workspace_id=$2 AND id=$3 AND version=$6',[ctx.tenantId,ctx.workspaceId,e.id,p,e.version,e.loadedVersion]);if(!r.rowCount)throw new ConcurrencyConflictError('Stale campaign or wrong workspace',String(ctx.tenantId),String(e.id),e.loadedVersion);}});e.setVersion(e.version);}}

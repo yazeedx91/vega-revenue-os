@@ -19,8 +19,6 @@ export interface GraphReplyCorrelatorConfig {
   readonly allowSenderRecipientFallback?: boolean;
 }
 
-const NON_TERMINAL_STATUSES = new Set(['DRAFTING', 'PENDING_APPROVAL', 'APPROVED', 'QUEUED', 'SUBMITTED', 'ACCEPTED', 'DELIVERED', 'OPENED']);
-
 /**
  * Correlates a normalized inbound reply to the outbound
  * `OutreachMessageExecution` it responds to, in priority order:
@@ -63,27 +61,6 @@ export class GraphReplyCorrelator {
       return { status: 'NOT_CORRELATED', reason: 'No message-id-based match and sender/recipient fallback is disabled by policy' };
     }
 
-    if (!normalized.sender) {
-      return { status: 'NOT_CORRELATED', reason: 'No message-id-based match and no sender address to fall back on' };
-    }
-
-    // Fallback: the reply's sender is the original outbound recipient.
-    const candidates = await this.config.messageExecutionRepository.findByRecipientAddress(ctx, normalized.sender);
-    if (candidates.length === 0) {
-      return { status: 'NOT_CORRELATED', reason: `No outbound execution found for sender "${normalized.sender}"` };
-    }
-
-    const nonTerminal = candidates.filter((c) => NON_TERMINAL_STATUSES.has(c.status) || c.status === 'REPLIED');
-    const pool = nonTerminal.length > 0 ? nonTerminal : candidates;
-
-    if (pool.length > 1) {
-      return {
-        status: 'AMBIGUOUS',
-        reason: `${pool.length} candidate executions found for sender "${normalized.sender}"; refusing to guess`,
-        candidateCount: pool.length,
-      };
-    }
-
-    return { status: 'CORRELATED', execution: pool[0], matchedBy: 'SENDER_RECIPIENT_FALLBACK' };
+    return { status: 'NOT_CORRELATED', reason: 'Protected recipient fallback requires an authenticated workspace-bound subscription' };
   }
 }

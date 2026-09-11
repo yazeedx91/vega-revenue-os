@@ -10,16 +10,20 @@ import { OutreachSequenceLifecycleService } from '../application/outreach-sequen
 
 describe('PostgresSequenceRepository', () => {
   const tenantId = asTenantId('tenant-1');
-  const ctx = { tenantId, correlationId: asCorrelationId('corr-1') };
+  const ctx = { tenantId, workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
 
   function makeSequence() {
     return OutreachSequence.create(
       {
         id: asSequenceId('seq-1'),
         tenantId,
+        workspaceId: 'workspace-1',
         campaignId: asCampaignId('camp-1'),
         leadId: 'lead-1' as any,
-        recipient: { contactId: 'c1' as any, channel: 'email', address: 'a@b.com' },
+        contactId: 'contact-1',
+        recipientFingerprint: 'h1.1.fingerprint123',
+        recipientCiphertext: 'e1.1.ciphertext456',
+        recipientProtectionState: 'PROTECTED',
         steps: [{ stepNumber: 1, channel: 'email', delayMs: 0, requiresApproval: true, objective: 'first-touch' }],
       },
       asCorrelationId('corr-1'),

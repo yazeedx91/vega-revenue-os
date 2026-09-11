@@ -1,5 +1,5 @@
 import type { TenantContext } from '@projectx/domain';
-import type { IMessageExecutionRepository } from '../ports/outreach-repository.interface';
+import type { IMessageExecutionRepository, OutreachRepositoryContext } from '../ports/outreach-repository.interface';
 
 export interface ReconciliationExecutionView {
   readonly executionId: string;
@@ -7,7 +7,7 @@ export interface ReconciliationExecutionView {
   readonly campaignId: string;
   readonly sequenceId: string;
   readonly stepNumber: number;
-  readonly recipientAddress: string;
+  readonly recipientFingerprint?: string;
   readonly channel: string;
   readonly idempotencyKey: string;
   readonly status: string;
@@ -23,7 +23,7 @@ export interface ReconciliationExecutionView {
 export class ReconciliationQueryService {
   constructor(private readonly executionRepository: IMessageExecutionRepository) {}
 
-  async findUnknownOrRequiresReconciliation(ctx: TenantContext): Promise<ReconciliationExecutionView[]> {
+  async findUnknownOrRequiresReconciliation(ctx: OutreachRepositoryContext): Promise<ReconciliationExecutionView[]> {
     const executions = await this.executionRepository.findByStatus(ctx, ['DELIVERY_UNKNOWN', 'REQUIRES_RECONCILIATION']);
     return executions.map((execution) => ({
       executionId: execution.id as string,
@@ -31,7 +31,7 @@ export class ReconciliationQueryService {
       campaignId: execution.campaignId as string,
       sequenceId: execution.sequenceId as string,
       stepNumber: execution.stepNumber,
-      recipientAddress: execution.recipientAddress,
+      recipientFingerprint: execution.recipientFingerprint,
       channel: execution.channel,
       idempotencyKey: execution.idempotencyKey as string,
       status: execution.status,

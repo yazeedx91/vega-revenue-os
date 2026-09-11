@@ -15,6 +15,7 @@
     "@nestjs/common": "^10.4.0",
     "@nestjs/core": "^10.4.0",
     "@projectx/ai-runtime": "workspace:*",
+    "@projectx/application": "workspace:*",
     "@projectx/conversation": "workspace:*",
     "@projectx/control-plane": "workspace:*",
     "@projectx/domain": "workspace:*",

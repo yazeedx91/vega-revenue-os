@@ -1,5 +1,10 @@
 import type { IReasoningEngine, IOutputValidator, ReasoningOutput, ValidationResult } from '@projectx/ai-runtime';
 import type { Lead, OutreachChannel, OutreachPlan, ProviderHealth, ProviderSendRequest, ProviderSendResult, TenantContext } from '@projectx/domain';
+import type { IOutboundRecipientSource } from '../ports/outbound-recipient-source.interface';
+import type {
+  IHistoricalRecipientFingerprint,
+  IOutboundRecipientRecovery,
+} from '../ports/outbound-recipient-recovery.interface';
 import { InMemoryAuditLog, InMemoryIdempotencyStore, InMemoryRateLimiter } from '@projectx/infrastructure';
 import {
   asAccountId,
@@ -30,7 +35,7 @@ import {
 
 describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
   const tenantA = asTenantId('tenant-a');
-  const ctx: TenantContext = { tenantId: tenantA, correlationId: asCorrelationId('corr-1') };
+  const ctx: TenantContext = { tenantId: tenantA, workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
 
   const fakeReasoningEngine: IReasoningEngine = {
     async reason(): Promise<ReasoningOutput> {
@@ -59,9 +64,11 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
     ({
       id: asLeadId('lead-1'),
       tenantId: tenantA,
+      workspaceId: 'workspace-1',
       accountId: asAccountId('acc-1'),
       contactId: asContactId('contact-1'),
       icpProfileId: asICPProfileId('icp-1'),
+      icpProfileVersionId: asICPProfileId('icp-version-1'),
       scores: { icpMatch: 0.9, signalScore: 0.8, intentScore: 0.7, evidenceConfidence: 0.9, overall: 0.85 },
       status: 'QUALIFIED',
       evidenceReferences: [],
@@ -100,6 +107,33 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
     provider: SpyEmailProvider;
   }
 
+  class TestRecipientSource implements IOutboundRecipientSource {
+    async resolveProtectedEmailRecipient(input: {
+      tenantId: string;
+      workspaceId: string;
+      leadId: string;
+      contactId: string;
+    }) {
+      return {
+        contactId: input.contactId,
+        recipientFingerprint: 'h1.1.fingerprint123',
+        recipientCiphertext: 'e1.1.ciphertext456',
+      };
+    }
+  }
+
+  class TestRecipientRecovery implements IOutboundRecipientRecovery {
+    async recoverEmailForSend(): Promise<string> {
+      return 'test@example.com';
+    }
+  }
+
+  class TestHistoricalRecipientFingerprint implements IHistoricalRecipientFingerprint {
+    async fingerprintEmailForVersion(): Promise<string> {
+      return 'h1.1.fingerprint123';
+    }
+  }
+
   function buildHarness(options?: {
     budget?: { maxSendCount?: number; maxCostUsd?: number };
     rateLimitConfig?: { perSecond?: number; perMinute?: number; perHour?: number; perDay?: number };
@@ -114,7 +148,10 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
 
     const schedulePolicy = new InMemorySequenceSchedulePolicy();
     let seed = 0;
-    const planningService = new OutreachPlanningService({ generateSequenceId: () => asSequenceId(`seq-${++seed}`) });
+    const planningService = new OutreachPlanningService({
+      generateSequenceId: () => asSequenceId(`seq-${++seed}`),
+      recipientSource: new TestRecipientSource(),
+    });
     const personalizationService = new OutreachPersonalizationService({
       reasoningEngine: fakeReasoningEngine,
       outputValidator: fakeValidator,
@@ -148,6 +185,8 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
       schedulePolicy,
       personalizationService,
       safetyGate,
+      recipientRecovery: new TestRecipientRecovery(),
+      historicalRecipientFingerprint: new TestHistoricalRecipientFingerprint(),
       idempotencyStore,
       generateExecutionId: () => `exec-${++seed}`,
       generateEventId: () => `evt-${++seed}` as any,
@@ -161,18 +200,24 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
   async function setupDraftedExecution(
     harness: Harness,
     options?: { budget?: { maxSendCount?: number; maxCostUsd?: number } },
-  ): Promise<{ campaign: any; sequence: any; executionId: string; plan: OutreachPlan; recipientAddress: string }> {
+  ): Promise<{ campaign: any; sequence: any; executionId: string; plan: OutreachPlan }> {
     const { OutreachCampaign, OutreachSequence } = require('@projectx/domain');
     const lead = makeLead();
-    const planningService = new OutreachPlanningService({ generateSequenceId: () => asSequenceId(`seq-${Math.random()}`) });
-    const plan = planningService.plan(ctx, { campaignId: asCampaignId(`camp-${Math.random()}`), lead, evidence: [] });
+    const planningService = new OutreachPlanningService({
+      generateSequenceId: () => asSequenceId(`seq-${Math.random()}`),
+      recipientSource: new TestRecipientSource(),
+    });
+    const plan = await planningService.plan(ctx, { campaignId: asCampaignId(`camp-${Math.random()}`), lead, evidence: [] });
 
     const campaign = OutreachCampaign.create(
       {
         id: plan.campaignId,
         tenantId: tenantA,
+        workspaceId: 'workspace-1',
         leadId: lead.contactId as string,
-        recipient: plan.recipient,
+        contactId: lead.contactId as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         channel: plan.channel,
         steps: plan.steps,
         missionId: 'm-1',
@@ -187,9 +232,13 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
       {
         id: plan.sequenceId,
         tenantId: tenantA,
+        workspaceId: 'workspace-1',
         campaignId: campaign.id,
         leadId: lead.contactId as string,
-        recipient: plan.recipient,
+        contactId: lead.contactId as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientCiphertext: plan.recipient.recipientCiphertext,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         steps: plan.steps,
       },
       ctx.correlationId,
@@ -205,17 +254,17 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
       throw new Error(`Expected AWAITING_APPROVAL, got ${draft.status}`);
     }
 
-    return { campaign, sequence, executionId: draft.executionId as string, plan, recipientAddress: plan.recipient.address };
+    return { campaign, sequence, executionId: draft.executionId as string, plan };
   }
 
   async function authorize(
     harness: Harness,
-    target: { campaign: any; sequence: any; executionId: string; recipientAddress: string },
+    target: { campaign: any; sequence: any; executionId: string; plan: OutreachPlan },
     overrides?: { approvalId?: string; outcome?: any; approvalTenantId?: string; approvalCampaignId?: string; approvalSequenceId?: string; approvalExecutionId?: string; actionType?: string; skipAllowlist?: boolean },
   ): Promise<string> {
     const approvalId = overrides?.approvalId ?? 'approval-1';
     if (!overrides?.skipAllowlist) {
-      await harness.allowlistRepo.add(ctx, { channel: 'email', address: target.recipientAddress, approvedBy: 'test-harness' });
+      await harness.allowlistRepo.add(ctx, { channel: 'email', address: 'test@example.com', approvedBy: 'test-harness' });
     }
     harness.approvalPort.seed({
       approvalId,
@@ -223,7 +272,7 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
       campaignId: overrides?.approvalCampaignId ?? (target.campaign.id as string),
       sequenceId: overrides?.approvalSequenceId ?? (target.sequence.id as string),
       executionId: overrides?.approvalExecutionId ?? target.executionId,
-      recipientAddress: target.recipientAddress,
+      recipientFingerprint: target.plan.recipient.recipientFingerprint,
       actionType: overrides?.actionType ?? 'OUTREACH_EMAIL_SEND',
       outcome: overrides?.outcome ?? 'APPROVED',
     });
@@ -259,7 +308,7 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
     const harness = buildHarness();
     const target = await setupDraftedExecution(harness);
     await authorize(harness, target);
-    await harness.suppressionRepo.suppress(ctx, target.recipientAddress, 'MANUAL', 'compliance-team', 'Do not contact');
+    await harness.suppressionRepo.suppress(ctx, 'test@example.com', 'MANUAL', 'compliance-team', 'Do not contact');
 
     const result = await harness.executionService.executeApprovedSend(ctx, target.executionId as any, 'approval-1' as any);
 
@@ -272,7 +321,7 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
     const harness = buildHarness();
     const target = await setupDraftedExecution(harness);
     await authorize(harness, target);
-    await harness.suppressionRepo.suppress(ctx, target.recipientAddress, 'OPT_OUT', 'conversation-reply-handler', 'Prospect asked to stop');
+    await harness.suppressionRepo.suppress(ctx, 'test@example.com', 'OPT_OUT', 'conversation-reply-handler', 'Prospect asked to stop');
 
     const result = await harness.executionService.executeApprovedSend(ctx, target.executionId as any, 'approval-1' as any);
 
@@ -284,7 +333,7 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
   it('missing approval → DENY, provider.send() is never called', async () => {
     const harness = buildHarness();
     const target = await setupDraftedExecution(harness);
-    await harness.allowlistRepo.add(ctx, { channel: 'email', address: target.recipientAddress, approvedBy: 'test-harness' });
+    await harness.allowlistRepo.add(ctx, { channel: 'email', address: 'test@example.com', approvedBy: 'test-harness' });
     // Note: approval is intentionally never seeded.
 
     const result = await harness.executionService.executeApprovedSend(ctx, target.executionId as any, 'approval-1' as any);
@@ -474,6 +523,7 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
       ctx,
       campaign: target.campaign,
       execution: execution!,
+      recipientAddress: 'test@example.com',
       approvalId,
       actionType: 'OUTREACH_EMAIL_SEND',
       estimatedCostUsd: 0.1,
@@ -512,7 +562,7 @@ describe('SendSafetyGate — Phase 14 Milestone 5 safety boundary', () => {
     const denialEntry = harness.auditLog.entries.find((e) => e.result === 'denied');
     expect(denialEntry).toBeDefined();
     expect(denialEntry!.tenantId).toBe(tenantA as string);
-    expect(denialEntry!.metadata?.recipientAddress).toBe(target.recipientAddress);
+    expect(denialEntry!.metadata?.recipientFingerprint).toBe(target.plan.recipient.recipientFingerprint);
     expect(denialEntry!.metadata?.campaignId).toBe(target.campaign.id);
     expect(denialEntry!.metadata?.sequenceId).toBe(target.sequence.id);
     expect(denialEntry!.metadata?.executionId).toBe(target.executionId);

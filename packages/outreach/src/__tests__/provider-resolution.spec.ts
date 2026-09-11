@@ -1,5 +1,10 @@
 import type { Lead, OutreachPlan, ProviderSendRequest, ProviderSendResult, TenantContext } from '@projectx/domain';
 import { ResearchEvidence } from '@projectx/domain';
+import type { IOutboundRecipientSource } from '../ports/outbound-recipient-source.interface';
+import type {
+  IHistoricalRecipientFingerprint,
+  IOutboundRecipientRecovery,
+} from '../ports/outbound-recipient-recovery.interface';
 import { InMemoryAuditLog, InMemoryIdempotencyStore, InMemoryRateLimiter } from '@projectx/infrastructure';
 import {
   asAccountId,
@@ -36,9 +41,11 @@ function makeLead(contactSuffix = '1'): Lead {
   return {
     id: asLeadId(`lead-${contactSuffix}`),
     tenantId: tenantA,
+    workspaceId: 'workspace-1',
     accountId: asAccountId(`acc-${contactSuffix}`),
     contactId: asContactId(`contact-${contactSuffix}`),
     icpProfileId: asICPProfileId('icp-1'),
+    icpProfileVersionId: asICPProfileId('icp-version-1'),
     scores: {
       icpMatch: 0.9,
       signalScore: 0.8,
@@ -92,8 +99,35 @@ class FakeGraphEmailProvider implements IEmailProvider {
   }
 }
 
+class TestRecipientSource implements IOutboundRecipientSource {
+  async resolveProtectedEmailRecipient(input: {
+    tenantId: string;
+    workspaceId: string;
+    leadId: string;
+    contactId: string;
+  }) {
+    return {
+      contactId: input.contactId,
+      recipientFingerprint: 'h1.1.fingerprint123',
+      recipientCiphertext: 'e1.1.ciphertext456',
+    };
+  }
+}
+
+class TestRecipientRecovery implements IOutboundRecipientRecovery {
+  async recoverEmailForSend(): Promise<string> {
+    return 'test@example.com';
+  }
+}
+
+class TestHistoricalRecipientFingerprint implements IHistoricalRecipientFingerprint {
+  async fingerprintEmailForVersion(): Promise<string> {
+    return 'h1.1.fingerprint123';
+  }
+}
+
 function buildServices() {
-  const ctx: TenantContext = { tenantId: tenantA, correlationId: asCorrelationId('corr-1') };
+  const ctx: TenantContext = { tenantId: tenantA, workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
   const campaignRepo = new InMemoryCampaignRepository();
   const sequenceRepo = new InMemorySequenceRepository();
   const executionRepo = new InMemoryMessageExecutionRepository();
@@ -101,7 +135,10 @@ function buildServices() {
   const schedulePolicy = new InMemorySequenceSchedulePolicy();
   let seed = 0;
 
-  const planningService = new OutreachPlanningService({ generateSequenceId: () => asSequenceId(`seq-${++seed}`) });
+  const planningService = new OutreachPlanningService({
+    generateSequenceId: () => asSequenceId(`seq-${++seed}`),
+    recipientSource: new TestRecipientSource(),
+  });
   const personalizationService = new OutreachPersonalizationService({
     reasoningEngine: {
       async reason() {
@@ -153,6 +190,8 @@ function buildServices() {
     schedulePolicy,
     personalizationService,
     safetyGate,
+    recipientRecovery: new TestRecipientRecovery(),
+    historicalRecipientFingerprint: new TestHistoricalRecipientFingerprint(),
     idempotencyStore,
     generateExecutionId: () => `exec-${++seed}`,
     generateEventId: () => `evt-${++seed}` as any,
@@ -182,15 +221,18 @@ describe('Outreach provider resolution', () => {
 
     const lead = makeLead();
     const evidence = [makeEvidence('ev-1')];
-    const plan = deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
+    const plan = await deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
     const { OutreachCampaign, OutreachSequence } = require('@projectx/domain');
 
     const campaign = OutreachCampaign.create(
       {
         id: plan.campaignId,
         tenantId: tenantA,
+        workspaceId: 'workspace-1',
         leadId: lead.contactId as string,
-        recipient: plan.recipient,
+        contactId: lead.contactId as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         channel: plan.channel,
         steps: plan.steps,
         missionId: 'm-1',
@@ -207,9 +249,13 @@ describe('Outreach provider resolution', () => {
       {
         id: plan.sequenceId,
         tenantId: tenantA,
+        workspaceId: 'workspace-1',
         campaignId: campaign.id,
         leadId: lead.contactId as string,
-        recipient: plan.recipient,
+        contactId: lead.contactId as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientCiphertext: plan.recipient.recipientCiphertext,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         steps: plan.steps,
       },
       ctx.correlationId,
@@ -226,7 +272,7 @@ describe('Outreach provider resolution', () => {
 
     await deps.allowlistRepo.add(ctx, {
       channel: 'email',
-      address: plan.recipient.address,
+      address: 'test@example.com',
       approvedBy: 'test-harness',
     });
     deps.approvalPort.seed({
@@ -235,7 +281,7 @@ describe('Outreach provider resolution', () => {
       campaignId: campaign.id as string,
       sequenceId: sequence.id as string,
       executionId: draft.executionId as string,
-      recipientAddress: plan.recipient.address,
+      recipientFingerprint: plan.recipient.recipientFingerprint,
       actionType: 'OUTREACH_EMAIL_SEND',
       outcome: 'APPROVED',
     });
@@ -258,15 +304,18 @@ describe('Outreach provider resolution', () => {
 
     const lead = makeLead();
     const evidence = [makeEvidence('ev-1')];
-    const plan = deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
+    const plan = await deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
     const { OutreachCampaign, OutreachSequence } = require('@projectx/domain');
 
     const campaign = OutreachCampaign.create(
       {
         id: plan.campaignId,
         tenantId: tenantA,
+        workspaceId: 'workspace-1',
         leadId: lead.contactId as string,
-        recipient: plan.recipient,
+        contactId: lead.contactId as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         channel: plan.channel,
         steps: plan.steps,
         missionId: 'm-1',
@@ -283,9 +332,13 @@ describe('Outreach provider resolution', () => {
       {
         id: plan.sequenceId,
         tenantId: tenantA,
+        workspaceId: 'workspace-1',
         campaignId: campaign.id,
         leadId: lead.contactId as string,
-        recipient: plan.recipient,
+        contactId: lead.contactId as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientCiphertext: plan.recipient.recipientCiphertext,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         steps: plan.steps,
       },
       ctx.correlationId,
@@ -302,7 +355,7 @@ describe('Outreach provider resolution', () => {
 
     await deps.allowlistRepo.add(ctx, {
       channel: 'email',
-      address: plan.recipient.address,
+      address: 'test@example.com',
       approvedBy: 'test-harness',
     });
     deps.approvalPort.seed({
@@ -311,7 +364,7 @@ describe('Outreach provider resolution', () => {
       campaignId: campaign.id as string,
       sequenceId: sequence.id as string,
       executionId: draft.executionId as string,
-      recipientAddress: plan.recipient.address,
+      recipientFingerprint: plan.recipient.recipientFingerprint,
       actionType: 'OUTREACH_EMAIL_SEND',
       outcome: 'APPROVED',
     });

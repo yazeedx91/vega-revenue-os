@@ -7,29 +7,13 @@ import { persistReplyBasedOptOut } from '../application/persist-reply-opt-out';
 const ctx: TenantContext = { tenantId: asTenantId('tenant-a'), correlationId: asCorrelationId('corr-1') };
 
 describe('persistReplyBasedOptOut', () => {
-  it('resolves the recipient address via the originating execution when executionId is present', async () => {
+  it('resolves the recipient address from event.sender (the prospect address) for reply-based opt-out', async () => {
     const suppressionRepository = new InMemorySuppressionRepository();
     const messageExecutionRepository = new InMemoryMessageExecutionRepository();
-    const execution = OutreachMessageExecution.create(
-      {
-        id: asOutreachExecutionId('exec-1'),
-        tenantId: ctx.tenantId,
-        campaignId: asCampaignId('camp-1'),
-        sequenceId: asSequenceId('seq-1'),
-        stepNumber: 1,
-        leadId: 'lead-1',
-        recipientAddress: 'prospect@example.com',
-        channel: 'email',
-        idempotencyKey: asIdempotencyKey('idmp-1'),
-      },
-      ctx.correlationId,
-      asEventId('evt-1'),
-    );
-    await messageExecutionRepository.save(ctx, execution);
 
     await persistReplyBasedOptOut(
       ctx,
-      { tenantId: 'tenant-a', leadId: 'lead-1' as any, channel: 'email', providerMessageId: 'p-1', content: 'stop', receivedAt: new Date(), executionId: 'exec-1' },
+      { tenantId: 'tenant-a', leadId: 'lead-1' as any, channel: 'email', providerMessageId: 'p-1', content: 'stop', receivedAt: new Date(), sender: 'prospect@example.com' },
       { suppressionRepository, messageExecutionRepository },
     );
 

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import {
   ensureSameTenant,
   OutreachMessageExecution,
@@ -11,13 +12,14 @@ import {
   type ResearchEvidence,
   type SequenceStep,
 } from '@projectx/domain';
-import type { TenantContext } from '@projectx/domain';
+
 import { asIdempotencyKey, asOutreachMessageId, type ApprovalId, type CorrelationId, type EventId, type OutreachExecutionId, type SequenceId } from '@projectx/shared';
 import { ConcurrencyConflictError, type IIdempotencyStore } from '@projectx/infrastructure';
 import type { IOutreachProviderRegistry } from '../ports/outreach-provider-registry.interface';
-import type { ICampaignRepository, IMessageExecutionRepository, ISequenceRepository } from '../ports/outreach-repository.interface';
+import type { ICampaignRepository, IMessageExecutionRepository, ISequenceRepository, OutreachRepositoryContext } from '../ports/outreach-repository.interface';
 import type { ISequenceSchedulePolicy } from '../ports/sequence-schedule-policy.interface';
 import type { SendSafetyGate } from '../safety/send-safety-gate';
+import type { IHistoricalRecipientFingerprint, IOutboundRecipientRecovery } from '../ports/outbound-recipient-recovery.interface';
 import type { OutreachPersonalizationService } from './outreach-personalization.service';
 
 const IDEMPOTENCY_SCOPE = 'outreach:send';
@@ -30,6 +32,8 @@ export interface OutreachExecutionServiceDependencies {
   schedulePolicy: ISequenceSchedulePolicy;
   personalizationService: OutreachPersonalizationService;
   safetyGate: SendSafetyGate;
+  recipientRecovery: IOutboundRecipientRecovery;
+  historicalRecipientFingerprint: IHistoricalRecipientFingerprint;
   idempotencyStore?: IIdempotencyStore;
   generateExecutionId: () => string;
   generateEventId: () => EventId;
@@ -49,7 +53,7 @@ export class OutreachExecutionService {
   constructor(private readonly deps: OutreachExecutionServiceDependencies) {}
 
   async prepareDraft(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     sequenceId: string,
     plan: OutreachPlan,
     lead: Lead,
@@ -78,11 +82,15 @@ export class OutreachExecutionService {
     const execution = OutreachMessageExecution.create(
       {
         tenantId: ctx.tenantId,
+        workspaceId: sequence.workspaceId,
         campaignId: campaign.id,
         sequenceId: sequence.id,
         stepNumber: step.stepNumber,
         leadId: sequence.leadId as string,
-        recipientAddress: sequence.recipient.address,
+        contactId: sequence.contactId,
+        recipientFingerprint: sequence.recipientFingerprint,
+        recipientCiphertext: sequence.recipientCiphertext,
+        recipientProtectionState: sequence.recipientProtectionState,
         channel: step.channel,
         idempotencyKey: asIdempotencyKey(idempotencyKey),
       },
@@ -117,7 +125,7 @@ export class OutreachExecutionService {
   }
 
   async executeApprovedSend(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     executionId: OutreachExecutionId,
     approvalId: ApprovalId,
   ): Promise<ExecuteSendResult> {
@@ -132,7 +140,7 @@ export class OutreachExecutionService {
   }
 
   private async resolveFromAuthoritativeState(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     executionId: OutreachExecutionId,
   ): Promise<ExecuteSendResult> {
     const execution = await this.deps.executionRepository.load(ctx, executionId);
@@ -150,7 +158,7 @@ export class OutreachExecutionService {
   }
 
   private async doExecuteApprovedSend(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     executionId: OutreachExecutionId,
     approvalId: ApprovalId,
   ): Promise<ExecuteSendResult> {
@@ -219,6 +227,12 @@ export class OutreachExecutionService {
       return { status: 'FAILED', executionId, reason: 'Step not found' };
     }
 
+    let recipientAddress: string;
+    try {
+      recipientAddress = await this.recoverAndVerifyRecipient(execution);
+    } catch {
+      return { status: 'FAILED', executionId, reason: 'Protected recipient recovery failed' };
+    }
     const estimatedCost = this.deps.channelCostEstimate(step.channel);
 
     // Single authoritative pre-send safety decision — tenant, allowlist,
@@ -232,6 +246,7 @@ export class OutreachExecutionService {
       ctx,
       campaign,
       execution,
+      recipientAddress,
       approvalId: approvalId as unknown as string,
       actionType: actionTypeForChannel(step.channel),
       estimatedCostUsd: estimatedCost,
@@ -291,7 +306,7 @@ export class OutreachExecutionService {
       campaignId: campaign.id,
       sequenceId: execution.sequenceId,
       messageId: execution.messageId ?? (execution.id as unknown as ReturnType<typeof asOutreachMessageId>),
-      recipientAddress: execution.recipientAddress,
+      recipientAddress,
       subject: execution.draft?.subject,
       body: execution.draft?.body ?? '',
       cta: execution.draft?.cta,
@@ -373,7 +388,7 @@ export class OutreachExecutionService {
   }
 
   async recordResponse(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     executionId: OutreachExecutionId,
     responseType: 'OPENED' | 'REPLIED',
   ): Promise<void> {
@@ -394,7 +409,7 @@ export class OutreachExecutionService {
   }
 
   private async advanceSequence(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     sequence: OutreachSequence,
     execution: OutreachMessageExecutionType,
   ): Promise<ExecuteSendResult> {
@@ -439,7 +454,7 @@ export class OutreachExecutionService {
   }
 
   private async markIdempotencyCompleted(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     execution: OutreachMessageExecutionType,
     result: { providerMessageId?: string; internetMessageId?: string },
   ): Promise<void> {
@@ -455,7 +470,7 @@ export class OutreachExecutionService {
   }
 
   private async markIdempotencyFailed(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     execution: OutreachMessageExecutionType,
     submitted: boolean,
     reason?: string,
@@ -472,7 +487,7 @@ export class OutreachExecutionService {
   }
 
   private async handleDuplicateSendIdempotency(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     localExecution: OutreachMessageExecutionType,
     executionId: OutreachExecutionId,
   ): Promise<ExecuteSendResult> {
@@ -605,7 +620,7 @@ export class OutreachExecutionService {
   }
 
   private async saveAuthoritative(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     execution: OutreachMessageExecutionType,
     executionId: OutreachExecutionId,
   ): Promise<OutreachMessageExecutionType> {
@@ -637,13 +652,32 @@ export class OutreachExecutionService {
     return { status: 'FAILED', executionId, reason: execution.lastError ?? `Execution is ${execution.status}` };
   }
 
+  private async recoverAndVerifyRecipient(execution: OutreachMessageExecutionType): Promise<string> {
+    if (execution.recipientProtectionState !== 'PROTECTED' || !execution.recipientCiphertext || !execution.recipientFingerprint) {
+      throw new Error('Protected recipient is unavailable');
+    }
+    const parts = execution.recipientFingerprint.split('.');
+    if (parts.length !== 3 || parts[0] !== 'h1' || !/^[A-Za-z0-9_-]{1,64}$/.test(parts[1])) {
+      throw new Error('Protected recipient fingerprint is invalid');
+    }
+    const recovered = await this.deps.recipientRecovery.recoverEmailForSend(String(execution.tenantId), execution.recipientCiphertext);
+    const verified = await this.deps.historicalRecipientFingerprint.fingerprintEmailForVersion(String(execution.tenantId), recovered, parts[1]);
+    const storedBuffer = Buffer.from(execution.recipientFingerprint);
+    const verifiedBuffer = Buffer.from(verified);
+    if (storedBuffer.length !== verifiedBuffer.length || !timingSafeEqual(storedBuffer, verifiedBuffer)) {
+      throw new Error('Protected recipient fingerprint mismatch');
+    }
+    return recovered;
+  }
+
   private makeSendIdempotencyKey(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     campaign: OutreachCampaign,
     sequence: OutreachSequence,
     step: SequenceStep,
   ): string {
-    return `outreach:${ctx.tenantId}:${campaign.id}:${sequence.id}:${step.stepNumber}:${sequence.recipient.address}:${step.channel}`;
+    if (!sequence.recipientFingerprint) throw new Error('Protected recipient fingerprint is required for idempotency');
+    return `outreach:v2:${ctx.tenantId}:${campaign.id}:${sequence.id}:${step.stepNumber}:${sequence.recipientFingerprint}:${step.channel}`;
   }
 }
 

@@ -1,175 +1,21 @@
 import type { Pool } from 'pg';
-import { Conversation, ReplyMessage } from '@projectx/domain';
-import { ensureSameTenant, type TenantContext } from '@projectx/domain';
+import { AuthorizationError, Conversation, ReplyMessage, TenantIsolationError } from '@projectx/domain';
 import type { ConversationStatus, NextActionType, ReplyIntent } from '@projectx/domain';
 import type { ConversationId, LeadId, TenantId } from '@projectx/shared';
 import { asReplyMessageId } from '@projectx/shared';
-import { PostgresClient, PostgresRepository, toDate } from '@projectx/infrastructure';
-import type { IConversationRepository } from '../ports/conversation-repository.interface';
+import { ConcurrencyConflictError, PostgresClient, toDate } from '@projectx/infrastructure';
+import type { ConversationRepositoryContext, IConversationRepository } from '../ports/conversation-repository.interface';
 
-type ReplyMessageSnapshot = {
-  id: string;
-  providerMessageId: string;
-  channel: string;
-  content: string;
-  receivedAt: string | Date;
-  messageIdHeader?: string;
-  sender?: string;
-  recipientAddress?: string;
-  subject?: string;
-  htmlBody?: string;
-  inReplyTo?: string;
-  references?: string[];
-};
-
-function toReplyMessageSnapshot(message: ReplyMessage): ReplyMessageSnapshot {
-  return {
-    id: message.id as string,
-    providerMessageId: message.providerMessageId,
-    channel: message.channel,
-    content: message.content,
-    receivedAt: message.receivedAt,
-    messageIdHeader: message.messageIdHeader,
-    sender: message.sender,
-    recipientAddress: message.recipientAddress,
-    subject: message.subject,
-    htmlBody: message.htmlBody,
-    inReplyTo: message.inReplyTo,
-    references: message.references,
-  };
+type Reply={id:string;providerMessageId:string;channel:string;content:string;receivedAt:string|Date;messageIdHeader?:string;sender?:string;recipientAddress?:string;subject?:string;htmlBody?:string;inReplyTo?:string;references?:string[]};
+type S={id?:ConversationId;tenantId?:TenantId;workspaceId:string;leadId:string;channel:string;recipientAddress?:string;campaignId?:string;sequenceId?:string;executionId?:string;status:string;messages:Reply[];latestIntent?:string;latestConfidence?:number;nextAction?:string;escalatedReason?:string;optedOut:boolean;createdAt:Date;updatedAt:Date};
+const reply=(m:ReplyMessage):Reply=>({id:m.id,providerMessageId:m.providerMessageId,channel:m.channel,content:m.content,receivedAt:m.receivedAt,messageIdHeader:m.messageIdHeader,sender:m.sender,recipientAddress:m.recipientAddress,subject:m.subject,htmlBody:m.htmlBody,inReplyTo:m.inReplyTo,references:m.references});
+const message=(m:Reply)=>new ReplyMessage({...m,id:asReplyMessageId(m.id),receivedAt:toDate(m.receivedAt)!});
+const snap=(e:Conversation):S=>({id:e.id,tenantId:e.tenantId,workspaceId:e.workspaceId,leadId:e.leadId,channel:e.channel,recipientAddress:e.recipientAddress,campaignId:e.campaignId,sequenceId:e.sequenceId,executionId:e.executionId,status:e.status,messages:e.messages.map(reply),latestIntent:e.latestIntent,latestConfidence:e.latestConfidence,nextAction:e.nextAction,escalatedReason:e.escalatedReason,optedOut:e.optedOut,createdAt:e.createdAt,updatedAt:e.updatedAt});
+function restore(r:any){const s=r.payload as S;return Conversation.reconstitute({...s,id:r.id,tenantId:r.tenant_id as TenantId,workspaceId:r.workspace_id,leadId:r.lead_id as LeadId,executionId:r.execution_id??undefined,status:s.status as ConversationStatus,latestIntent:s.latestIntent as ReplyIntent|undefined,nextAction:s.nextAction as NextActionType|undefined,messages:(s.messages??[]).map(message),createdAt:toDate(s.createdAt),updatedAt:toDate(s.updatedAt)},r.version);}
+export interface PostgresConversationRepositoryConfig{pool:Pool}
+export class PostgresConversationRepository implements IConversationRepository{
+ private readonly db:PostgresClient;constructor(c:PostgresConversationRepositoryConfig){this.db=new PostgresClient(c.pool);}
+ async load(ctx:ConversationRepositoryContext,id:ConversationId){return this.db.withTenant(ctx,async c=>{const r=await c.query('SELECT * FROM conversation.conversations WHERE tenant_id=$1 AND workspace_id=$2 AND id=$3',[ctx.tenantId,ctx.workspaceId,id]);return r.rows[0]?restore(r.rows[0]):null;});}
+ async findByLeadAndChannel(ctx:ConversationRepositoryContext,leadId:string,channel:string){return this.db.withTenant(ctx,async c=>{const r=await c.query('SELECT * FROM conversation.conversations WHERE tenant_id=$1 AND workspace_id=$2 AND lead_id=$3 AND payload->>\'channel\'=$4 LIMIT 1',[ctx.tenantId,ctx.workspaceId,leadId,channel]);return r.rows[0]?restore(r.rows[0]):null;});}
+ async save(ctx:ConversationRepositoryContext,e:Conversation){if(e.tenantId!==ctx.tenantId)throw new TenantIsolationError('Conversation tenant mismatch');if(e.workspaceId!==ctx.workspaceId)throw new AuthorizationError('Conversation workspace mismatch');const p=JSON.stringify(snap(e));await this.db.withTenant(ctx,async c=>{if(e.loadedVersion===undefined){const r=await c.query('INSERT INTO conversation.conversations (tenant_id,workspace_id,id,lead_id,execution_id,payload,version,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW()) ON CONFLICT DO NOTHING RETURNING id',[ctx.tenantId,ctx.workspaceId,e.id,e.leadId,e.executionId??null,p,e.version]);if(!r.rowCount)throw new ConcurrencyConflictError('Conversation exists',String(ctx.tenantId),String(e.id),undefined);}else{const r=await c.query('UPDATE conversation.conversations SET payload=$4,version=$5,updated_at=NOW() WHERE tenant_id=$1 AND workspace_id=$2 AND id=$3 AND version=$6',[ctx.tenantId,ctx.workspaceId,e.id,p,e.version,e.loadedVersion]);if(!r.rowCount)throw new ConcurrencyConflictError('Stale conversation or wrong workspace',String(ctx.tenantId),String(e.id),e.loadedVersion);}});e.setVersion(e.version);}
 }
-
-function fromReplyMessageSnapshot(raw: ReplyMessageSnapshot): ReplyMessage {
-  return new ReplyMessage({
-    id: asReplyMessageId(raw.id),
-    providerMessageId: raw.providerMessageId,
-    channel: raw.channel,
-    content: raw.content,
-    receivedAt: toDate(raw.receivedAt)!,
-    messageIdHeader: raw.messageIdHeader,
-    sender: raw.sender,
-    recipientAddress: raw.recipientAddress,
-    subject: raw.subject,
-    htmlBody: raw.htmlBody,
-    inReplyTo: raw.inReplyTo,
-    references: raw.references,
-  });
-}
-
-export interface PostgresConversationRepositoryConfig {
-  pool: Pool;
-}
-
-export class PostgresConversationRepository implements IConversationRepository {
-  private readonly repository: PostgresRepository<Conversation, ConversationSnapshot, ConversationId>;
-  private readonly client: PostgresClient;
-
-  constructor(config: PostgresConversationRepositoryConfig) {
-    this.client = new PostgresClient(config.pool);
-    this.repository = new PostgresRepository<Conversation, ConversationSnapshot, ConversationId>(
-      { pool: config.pool, tableName: 'conversation.conversations' },
-      {
-        toSnapshot: (entity) => ({
-          id: entity.id,
-          tenantId: entity.tenantId,
-          leadId: entity.leadId,
-          channel: entity.channel,
-          recipientAddress: entity.recipientAddress,
-          campaignId: entity.campaignId,
-          sequenceId: entity.sequenceId,
-          executionId: entity.executionId,
-          status: entity.status,
-          messages: entity.messages.map(toReplyMessageSnapshot),
-          latestIntent: entity.latestIntent,
-          latestConfidence: entity.latestConfidence,
-          nextAction: entity.nextAction,
-          escalatedReason: entity.escalatedReason,
-          optedOut: entity.optedOut,
-          createdAt: entity.createdAt,
-          updatedAt: entity.updatedAt,
-        }),
-        fromSnapshot: (snapshot, id, tenantId, version) =>
-          Conversation.reconstitute(
-            {
-              ...snapshot,
-              id,
-              tenantId: tenantId as TenantId,
-              leadId: snapshot.leadId as LeadId,
-              status: snapshot.status as ConversationStatus,
-              latestIntent: snapshot.latestIntent as ReplyIntent | undefined,
-              nextAction: snapshot.nextAction as NextActionType | undefined,
-              messages: (snapshot.messages ?? []).map(fromReplyMessageSnapshot),
-              createdAt: toDate(snapshot.createdAt),
-              updatedAt: toDate(snapshot.updatedAt),
-            },
-            version,
-          ),
-      },
-    );
-  }
-
-  async load(ctx: TenantContext, id: ConversationId): Promise<Conversation | null> {
-    return this.repository.findById(ctx, id);
-  }
-
-  async save(ctx: TenantContext, conversation: Conversation): Promise<void> {
-    ensureSameTenant(ctx, conversation.tenantId);
-    await this.repository.save(ctx, conversation);
-  }
-
-  async findByLeadAndChannel(
-    ctx: TenantContext,
-    leadId: string,
-    channel: string,
-  ): Promise<Conversation | null> {
-    const result = await this.client.withTenant(ctx, async (client) => {
-      return client.query(
-        `SELECT payload, version FROM conversation.conversations
-         WHERE tenant_id = $1 AND payload->>'leadId' = $2 AND payload->>'channel' = $3
-         LIMIT 1`,
-        [ctx.tenantId as string, leadId, channel],
-      );
-    });
-
-    if (result.rows.length === 0) {
-      return null;
-    }
-
-    const snapshot = result.rows[0].payload as ConversationSnapshot;
-    return Conversation.reconstitute(
-      {
-        ...snapshot,
-        id: snapshot.id as ConversationId,
-        tenantId: ctx.tenantId as TenantId,
-        leadId: snapshot.leadId as LeadId,
-        status: snapshot.status as ConversationStatus,
-        latestIntent: snapshot.latestIntent as ReplyIntent | undefined,
-        nextAction: snapshot.nextAction as NextActionType | undefined,
-        messages: (snapshot.messages ?? []).map(fromReplyMessageSnapshot),
-        createdAt: toDate(snapshot.createdAt),
-        updatedAt: toDate(snapshot.updatedAt),
-      },
-      result.rows[0].version as number,
-    );
-  }
-}
-
-type ConversationSnapshot = {
-  id?: ConversationId;
-  tenantId?: string & { readonly __brand: 'TenantId' };
-  leadId: string;
-  channel: string;
-  recipientAddress?: string;
-  campaignId?: string;
-  sequenceId?: string;
-  executionId?: string;
-  status: string;
-  messages: ReplyMessageSnapshot[];
-  latestIntent?: string;
-  latestConfidence?: number;
-  nextAction?: string;
-  escalatedReason?: string;
-  optedOut: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-};

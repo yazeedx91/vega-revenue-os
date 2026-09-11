@@ -1,6 +1,11 @@
 import type { IReasoningEngine, IOutputValidator, ReasoningOutput, ValidationResult } from '@projectx/ai-runtime';
 import type { Lead, OutreachPlan, TenantContext } from '@projectx/domain';
 import { ResearchEvidence } from '@projectx/domain';
+import type { IOutboundRecipientSource } from '../ports/outbound-recipient-source.interface';
+import type {
+  IHistoricalRecipientFingerprint,
+  IOutboundRecipientRecovery,
+} from '../ports/outbound-recipient-recovery.interface';
 import {
   asAccountId,
   asCampaignId,
@@ -38,16 +43,19 @@ import {
 describe('Outreach Execution Kernel', () => {
   const tenantA = asTenantId('tenant-a');
   const tenantB = asTenantId('tenant-b');
-  let ctx: TenantContext;
+  const workspaceId = '00000000-0000-4000-8000-000000000001';
+  let ctx: TenantContext & { workspaceId: string };
 
   beforeEach(() => {
-    ctx = { tenantId: tenantA, correlationId: asCorrelationId('corr-1') };
+    ctx = { tenantId: tenantA,
+          workspaceId, workspaceId, correlationId: asCorrelationId('corr-1') };
   });
 
   const makeLead = (tenantId = tenantA, contactSuffix = '1'): Lead =>
     ({
       id: asLeadId(`lead-${contactSuffix}`),
       tenantId,
+      workspaceId,
       accountId: asAccountId(`acc-${contactSuffix}`),
       contactId: asContactId(`contact-${contactSuffix}`),
       icpProfileId: asICPProfileId('icp-1'),
@@ -137,6 +145,33 @@ describe('Outreach Execution Kernel', () => {
     },
   };
 
+  class TestRecipientSource implements IOutboundRecipientSource {
+    async resolveProtectedEmailRecipient(input: {
+      tenantId: string;
+      workspaceId: string;
+      leadId: string;
+      contactId: string;
+    }) {
+      return {
+        contactId: input.contactId,
+        recipientFingerprint: 'h1.1.fingerprint123',
+        recipientCiphertext: 'e1.1.ciphertext456',
+      };
+    }
+  }
+
+  class TestRecipientRecovery implements IOutboundRecipientRecovery {
+    async recoverEmailForSend(): Promise<string> {
+      return 'test@example.com';
+    }
+  }
+
+  class TestHistoricalRecipientFingerprint implements IHistoricalRecipientFingerprint {
+    async fingerprintEmailForVersion(): Promise<string> {
+      return 'h1.1.fingerprint123';
+    }
+  }
+
   function buildServices(tenantId = tenantA) {
     const campaignRepo = new InMemoryCampaignRepository();
     const sequenceRepo = new InMemorySequenceRepository();
@@ -144,7 +179,10 @@ describe('Outreach Execution Kernel', () => {
     const registry = new InMemoryOutreachProviderRegistry();
     const schedulePolicy = new InMemorySequenceSchedulePolicy();
     let seed = 0;
-    const planningService = new OutreachPlanningService({ generateSequenceId: () => asSequenceId(`seq-${++seed}`) });
+    const planningService = new OutreachPlanningService({
+      generateSequenceId: () => asSequenceId(`seq-${++seed}`),
+      recipientSource: new TestRecipientSource(),
+    });
 
     const personalizationService = new OutreachPersonalizationService({
       reasoningEngine: fakeReasoningEngine,
@@ -180,6 +218,8 @@ describe('Outreach Execution Kernel', () => {
       schedulePolicy,
       personalizationService,
       safetyGate,
+      recipientRecovery: new TestRecipientRecovery(),
+      historicalRecipientFingerprint: new TestHistoricalRecipientFingerprint(),
       idempotencyStore,
       generateExecutionId: () => `exec-${++seed}`,
       generateEventId: () => `evt-${++seed}` as any,
@@ -213,11 +253,11 @@ describe('Outreach Execution Kernel', () => {
   /** Seeds the allowlist + an APPROVED approval record so `executeApprovedSend` passes the safety gate in these behavior tests. */
   async function authorizeSend(
     deps: ReturnType<typeof buildServices>,
-    params: { tenantId: typeof tenantA; campaignId: string; sequenceId: string; executionId: string; recipientAddress: string; actionType?: string },
+    params: { tenantId: typeof tenantA; campaignId: string; sequenceId: string; executionId: string; recipientFingerprint: string; actionType?: string },
   ): Promise<void> {
     await deps.allowlistRepo.add(
       { tenantId: params.tenantId, correlationId: asCorrelationId('corr-authorize') },
-      { channel: 'email', address: params.recipientAddress, approvedBy: 'test-harness' },
+      { channel: 'email', address: 'test@example.com', approvedBy: 'test-harness' },
     );
     deps.approvalPort.seed({
       approvalId: 'approval-1',
@@ -225,7 +265,7 @@ describe('Outreach Execution Kernel', () => {
       campaignId: params.campaignId,
       sequenceId: params.sequenceId,
       executionId: params.executionId,
-      recipientAddress: params.recipientAddress,
+      recipientFingerprint: params.recipientFingerprint,
       actionType: params.actionType ?? 'OUTREACH_EMAIL_SEND',
       outcome: 'APPROVED',
     });
@@ -238,8 +278,11 @@ describe('Outreach Execution Kernel', () => {
         {
           id: asCampaignId('camp-1'),
           tenantId: tenantA,
+          workspaceId,
           leadId: 'lead-1',
-          recipient: { contactId: 'c1', channel: 'email', address: 'a@b.com' },
+          contactId: 'c1',
+          recipientFingerprint: 'h1.1.fingerprint123',
+          recipientProtectionState: 'PROTECTED',
           channel: 'email',
           steps: [{ stepNumber: 1, channel: 'email', delayMs: 0, requiresApproval: true, objective: 'first-touch' }],
           missionId: 'm-1',
@@ -269,8 +312,11 @@ describe('Outreach Execution Kernel', () => {
         {
           id: asCampaignId('camp-1'),
           tenantId: tenantA,
+          workspaceId,
           leadId: 'lead-1',
-          recipient: { contactId: 'c1', channel: 'email', address: 'a@b.com' },
+          contactId: 'c1',
+          recipientFingerprint: 'h1.1.fingerprint123',
+          recipientProtectionState: 'PROTECTED',
           channel: 'email',
           steps: [{ stepNumber: 1, channel: 'email', delayMs: 0, requiresApproval: true, objective: 'first-touch' }],
           missionId: 'm-1',
@@ -279,20 +325,23 @@ describe('Outreach Execution Kernel', () => {
         'evt-1' as any,
       );
       await repo.save(ctx, campaign);
-      await expect(repo.load({ tenantId: tenantB, correlationId: asCorrelationId('x') }, campaign.id)).rejects.toThrow();
+      await expect(repo.load({ tenantId: tenantB, workspaceId, correlationId: asCorrelationId('x') }, campaign.id)).resolves.toBeNull();
     });
   });
 
   describe('planning service', () => {
-    it('creates an email outreach plan with business hours', () => {
-      const svc = new OutreachPlanningService({ generateSequenceId: () => asSequenceId('seq-1') });
+    it('creates an email outreach plan with business hours', async () => {
+      const svc = new OutreachPlanningService({
+        generateSequenceId: () => asSequenceId('seq-1'),
+        recipientSource: new TestRecipientSource(),
+      });
       const lead = makeLead();
       const evidence = [makeEvidence('ev-1')];
-      const plan = svc.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence, channels: ['email'] });
+      const plan = await svc.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence, channels: ['email'] });
 
       expect(plan.channel).toBe('email');
       expect(plan.steps.length).toBeGreaterThanOrEqual(1);
-      expect(plan.recipient.address).toContain('contact-1');
+      expect(plan.recipient.recipientFingerprint).toBe('h1.1.fingerprint123');
       expect(plan.businessHours.timezone).toBe('UTC');
       expect(plan.requiresApproval).toBe(true);
     });
@@ -309,7 +358,10 @@ describe('Outreach Execution Kernel', () => {
       });
       const lead = makeLead();
       const evidence = [makeEvidence('ev-1')];
-      const plan = new OutreachPlanningService({ generateSequenceId: () => asSequenceId('seq-1') }).plan(ctx, {
+      const plan = await new OutreachPlanningService({
+        generateSequenceId: () => asSequenceId('seq-1'),
+        recipientSource: new TestRecipientSource(),
+      }).plan(ctx, {
         campaignId: asCampaignId('camp-1'),
         lead,
         evidence,
@@ -332,7 +384,10 @@ describe('Outreach Execution Kernel', () => {
       });
       const lead = makeLead();
       const evidence = [makeEvidence('ev-1')];
-      const plan = new OutreachPlanningService({ generateSequenceId: () => asSequenceId('seq-1') }).plan(ctx, {
+      const plan = await new OutreachPlanningService({
+        generateSequenceId: () => asSequenceId('seq-1'),
+        recipientSource: new TestRecipientSource(),
+      }).plan(ctx, {
         campaignId: asCampaignId('camp-1'),
         lead,
         evidence,
@@ -351,7 +406,10 @@ describe('Outreach Execution Kernel', () => {
       });
       const lead = makeLead();
       const evidence = [makeEvidence('ev-1')];
-      const plan = new OutreachPlanningService({ generateSequenceId: () => asSequenceId('seq-1') }).plan(ctx, {
+      const plan = await new OutreachPlanningService({
+        generateSequenceId: () => asSequenceId('seq-1'),
+        recipientSource: new TestRecipientSource(),
+      }).plan(ctx, {
         campaignId: asCampaignId('camp-1'),
         lead,
         evidence,
@@ -373,6 +431,7 @@ describe('Outreach Execution Kernel', () => {
         correlationId: asCorrelationId('c1'),
         executionId: 'exec-1' as any,
         tenantId: tenantA,
+          workspaceId,
         campaignId: asCampaignId('camp-1'),
         sequenceId: asSequenceId('seq-1'),
         messageId: asOutreachMessageId('msg-1'),
@@ -393,6 +452,7 @@ describe('Outreach Execution Kernel', () => {
         correlationId: asCorrelationId('c1'),
         executionId: 'exec-1' as any,
         tenantId: tenantA,
+          workspaceId,
         campaignId: asCampaignId('camp-1'),
         sequenceId: asSequenceId('seq-1'),
         messageId: asOutreachMessageId('msg-1'),
@@ -413,6 +473,7 @@ describe('Outreach Execution Kernel', () => {
         correlationId: asCorrelationId('c1'),
         executionId: 'exec-1' as any,
         tenantId: tenantA,
+          workspaceId,
         campaignId: asCampaignId('camp-1'),
         sequenceId: asSequenceId('seq-1'),
         messageId: asOutreachMessageId('msg-1'),
@@ -430,15 +491,18 @@ describe('Outreach Execution Kernel', () => {
       const deps = buildServices();
       const lead = makeLead();
       const evidence = [makeEvidence('ev-1')];
-      const plan = deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
+      const plan = await deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
       const { OutreachCampaign, OutreachSequence } = require('@projectx/domain');
 
       const campaign = OutreachCampaign.create(
         {
           id: plan.campaignId,
           tenantId: tenantA,
+          workspaceId,
           leadId: lead.contactId as string,
-          recipient: plan.recipient,
+          contactId: lead.contactId as string,
+          recipientFingerprint: plan.recipient.recipientFingerprint,
+          recipientProtectionState: plan.recipient.recipientProtectionState,
           channel: plan.channel,
           steps: plan.steps,
           missionId: 'm-1',
@@ -455,9 +519,13 @@ describe('Outreach Execution Kernel', () => {
         {
           id: plan.sequenceId,
           tenantId: tenantA,
+          workspaceId,
           campaignId: campaign.id,
           leadId: lead.contactId as string,
-          recipient: plan.recipient,
+          contactId: lead.contactId as string,
+          recipientFingerprint: plan.recipient.recipientFingerprint,
+          recipientCiphertext: plan.recipient.recipientCiphertext,
+          recipientProtectionState: plan.recipient.recipientProtectionState,
           steps: plan.steps,
         },
         ctx.correlationId,
@@ -480,15 +548,18 @@ describe('Outreach Execution Kernel', () => {
 
       const lead = makeLead();
       const evidence = [makeEvidence('ev-1')];
-      const plan = deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
+      const plan = await deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
       const { OutreachCampaign, OutreachSequence } = require('@projectx/domain');
 
       const campaign = OutreachCampaign.create(
         {
           id: plan.campaignId,
           tenantId: tenantA,
+          workspaceId,
           leadId: lead.contactId as string,
-          recipient: plan.recipient,
+          contactId: lead.contactId as string,
+          recipientFingerprint: plan.recipient.recipientFingerprint,
+          recipientProtectionState: plan.recipient.recipientProtectionState,
           channel: plan.channel,
           steps: plan.steps,
           missionId: 'm-1',
@@ -505,9 +576,13 @@ describe('Outreach Execution Kernel', () => {
         {
           id: plan.sequenceId,
           tenantId: tenantA,
+          workspaceId,
           campaignId: campaign.id,
           leadId: lead.contactId as string,
-          recipient: plan.recipient,
+          contactId: lead.contactId as string,
+          recipientFingerprint: plan.recipient.recipientFingerprint,
+          recipientCiphertext: plan.recipient.recipientCiphertext,
+          recipientProtectionState: plan.recipient.recipientProtectionState,
           steps: plan.steps,
         },
         ctx.correlationId,
@@ -524,10 +599,11 @@ describe('Outreach Execution Kernel', () => {
 
       await authorizeSend(deps, {
         tenantId: tenantA,
+          workspaceId,
         campaignId: campaign.id as string,
         sequenceId: sequence.id as string,
         executionId: draft.executionId as string,
-        recipientAddress: plan.recipient.address,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
       });
       const send = await deps.executionService.executeApprovedSend(ctx, draft.executionId, 'approval-1' as any);
       expect(send.status).toBe('COMPLETED');
@@ -544,15 +620,16 @@ describe('Outreach Execution Kernel', () => {
 
       const lead = makeLead();
       const evidence = [makeEvidence('ev-1')];
-      const plan = deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
+      const plan = await deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
       const { OutreachCampaign, OutreachSequence } = require('@projectx/domain');
 
       const campaign = OutreachCampaign.create(
         {
           id: plan.campaignId,
           tenantId: tenantA,
+          workspaceId,
           leadId: lead.contactId as string,
-          recipient: plan.recipient,
+          ...plan.recipient,
           channel: plan.channel,
           steps: plan.steps,
           missionId: 'm-1',
@@ -570,9 +647,13 @@ describe('Outreach Execution Kernel', () => {
         {
           id: plan.sequenceId,
           tenantId: tenantA,
+          workspaceId,
           campaignId: campaign.id,
           leadId: lead.contactId as string,
-          recipient: plan.recipient,
+          contactId: lead.contactId as string,
+          recipientFingerprint: plan.recipient.recipientFingerprint,
+          recipientCiphertext: plan.recipient.recipientCiphertext,
+          recipientProtectionState: plan.recipient.recipientProtectionState,
           steps: plan.steps,
         },
         ctx.correlationId,
@@ -589,10 +670,11 @@ describe('Outreach Execution Kernel', () => {
 
       await authorizeSend(deps, {
         tenantId: tenantA,
+          workspaceId,
         campaignId: campaign.id as string,
         sequenceId: sequence.id as string,
         executionId: draft.executionId as string,
-        recipientAddress: plan.recipient.address,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
       });
       const send = await deps.executionService.executeApprovedSend(ctx, draft.executionId, 'approval-1' as any);
       expect(send.status).toBe('FAILED');
@@ -612,15 +694,18 @@ describe('Outreach Execution Kernel', () => {
 
       const lead = makeLead();
       const evidence = [makeEvidence('ev-1')];
-      const plan = deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
+      const plan = await deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
       const { OutreachCampaign, OutreachSequence } = require('@projectx/domain');
 
       const campaign = OutreachCampaign.create(
         {
           id: plan.campaignId,
           tenantId: tenantA,
+          workspaceId,
           leadId: lead.contactId as string,
-          recipient: plan.recipient,
+          contactId: lead.contactId as string,
+          recipientFingerprint: plan.recipient.recipientFingerprint,
+          recipientProtectionState: plan.recipient.recipientProtectionState,
           channel: plan.channel,
           steps: plan.steps,
           missionId: 'm-1',
@@ -637,9 +722,13 @@ describe('Outreach Execution Kernel', () => {
         {
           id: plan.sequenceId,
           tenantId: tenantA,
+          workspaceId,
           campaignId: campaign.id,
           leadId: lead.contactId as string,
-          recipient: plan.recipient,
+          contactId: lead.contactId as string,
+          recipientFingerprint: plan.recipient.recipientFingerprint,
+          recipientCiphertext: plan.recipient.recipientCiphertext,
+          recipientProtectionState: plan.recipient.recipientProtectionState,
           steps: plan.steps,
         },
         ctx.correlationId,
@@ -656,10 +745,11 @@ describe('Outreach Execution Kernel', () => {
 
       await authorizeSend(deps, {
         tenantId: tenantA,
+          workspaceId,
         campaignId: campaign.id as string,
         sequenceId: sequence.id as string,
         executionId: draft.executionId as string,
-        recipientAddress: plan.recipient.address,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
       });
       const send = await deps.executionService.executeApprovedSend(ctx, draft.executionId, 'approval-1' as any);
       expect(send.status).toBe('RETRYABLE');
@@ -678,15 +768,18 @@ describe('Outreach Execution Kernel', () => {
 
       const lead = makeLead();
       const evidence = [makeEvidence('ev-1')];
-      const plan = deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
+      const plan = await deps.planningService.plan(ctx, { campaignId: asCampaignId('camp-1'), lead, evidence });
       const { OutreachCampaign, OutreachSequence } = require('@projectx/domain');
 
       const campaign = OutreachCampaign.create(
         {
           id: plan.campaignId,
           tenantId: tenantA,
+          workspaceId,
           leadId: lead.contactId as string,
-          recipient: plan.recipient,
+          contactId: lead.contactId as string,
+          recipientFingerprint: plan.recipient.recipientFingerprint,
+          recipientProtectionState: plan.recipient.recipientProtectionState,
           channel: plan.channel,
           steps: plan.steps,
           missionId: 'm-1',
@@ -703,9 +796,13 @@ describe('Outreach Execution Kernel', () => {
         {
           id: plan.sequenceId,
           tenantId: tenantA,
+          workspaceId,
           campaignId: campaign.id,
           leadId: lead.contactId as string,
-          recipient: plan.recipient,
+          contactId: lead.contactId as string,
+          recipientFingerprint: plan.recipient.recipientFingerprint,
+          recipientCiphertext: plan.recipient.recipientCiphertext,
+          recipientProtectionState: plan.recipient.recipientProtectionState,
           steps: plan.steps,
         },
         ctx.correlationId,
@@ -720,10 +817,11 @@ describe('Outreach Execution Kernel', () => {
       if (draft.status !== 'AWAITING_APPROVAL') return;
       await authorizeSend(deps, {
         tenantId: tenantA,
+          workspaceId,
         campaignId: campaign.id as string,
         sequenceId: sequence.id as string,
         executionId: draft.executionId as string,
-        recipientAddress: plan.recipient.address,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
       });
       await deps.executionService.executeApprovedSend(ctx, draft.executionId, 'approval-1' as any);
 
@@ -748,9 +846,10 @@ describe('Outreach Execution Kernel', () => {
       const planResult = await deps.agentExecutor.execute({
         executionId: 'agent-exec-1',
         tenantId: tenantA,
+          workspaceId,
         missionId: 'm-1',
         taskType: 'plan-outreach',
-        context: { plan: { lead, evidence, mission: { channels: ['email'] } } },
+        context: { authorization: { workspaceId }, plan: { lead, evidence, mission: { channels: ['email'] } } },
         policy: {},
       } as any);
       expect(planResult.status).toBe('COMPLETED');
@@ -766,9 +865,10 @@ describe('Outreach Execution Kernel', () => {
       const draftResult = await deps.agentExecutor.execute({
         executionId: 'agent-exec-2',
         tenantId: tenantA,
+          workspaceId,
         missionId: 'm-1',
         taskType: 'draft-message',
-        context: { plan: { sequenceId, plan, lead, evidence } },
+        context: { authorization: { workspaceId }, plan: { sequenceId, plan, lead, evidence } },
         policy: {},
       } as any);
       expect(draftResult.status).toBe('AWAITING_APPROVAL');
@@ -776,17 +876,19 @@ describe('Outreach Execution Kernel', () => {
 
       await authorizeSend(deps, {
         tenantId: tenantA,
+          workspaceId,
         campaignId: sequence!.campaignId as string,
         sequenceId: sequenceId as string,
         executionId: executionId as string,
-        recipientAddress: plan.recipient.address,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
       });
       const sendResult = await deps.agentExecutor.execute({
         executionId: 'agent-exec-3',
         tenantId: tenantA,
+          workspaceId,
         missionId: 'm-1',
         taskType: 'execute-send',
-        context: { target: { executionId, approvalId: 'approval-1' } },
+        context: { authorization: { workspaceId }, target: { executionId, approvalId: 'approval-1' } },
         policy: {},
       } as any);
       expect(sendResult.status).toBe('COMPLETED');
@@ -794,9 +896,10 @@ describe('Outreach Execution Kernel', () => {
       const responseResult = await deps.agentExecutor.execute({
         executionId: 'agent-exec-4',
         tenantId: tenantA,
+          workspaceId,
         missionId: 'm-1',
         taskType: 'record-response',
-        context: { target: { executionId, responseType: 'REPLIED' } },
+        context: { authorization: { workspaceId }, target: { executionId, responseType: 'REPLIED' } },
         policy: {},
       } as any);
       expect(responseResult.status).toBe('COMPLETED');

@@ -1,116 +1,12 @@
 import type { Pool } from 'pg';
-import { OutreachSequence } from '@projectx/domain';
-import { ensureSameTenant, type TenantContext } from '@projectx/domain';
-import type { Recipient, SequenceStatus, SequenceStep } from '@projectx/domain';
+import { AuthorizationError, OutreachSequence, TenantIsolationError } from '@projectx/domain';
+import type { RecipientProtectionState, SequenceStatus, SequenceStep } from '@projectx/domain';
 import type { CampaignId, LeadId, SequenceId, TenantId } from '@projectx/shared';
-import { PostgresClient, PostgresRepository, toDate } from '@projectx/infrastructure';
-import type { ISequenceRepository } from '../ports/outreach-repository.interface';
+import { ConcurrencyConflictError, PostgresClient, toDate } from '@projectx/infrastructure';
+import type { ISequenceRepository, OutreachRepositoryContext } from '../ports/outreach-repository.interface';
 
-export interface PostgresSequenceRepositoryConfig {
-  pool: Pool;
-}
-
-export class PostgresSequenceRepository implements ISequenceRepository {
-  private readonly repository: PostgresRepository<OutreachSequence, SequenceSnapshot, SequenceId>;
-  private readonly client: PostgresClient;
-
-  constructor(config: PostgresSequenceRepositoryConfig) {
-    this.client = new PostgresClient(config.pool);
-    this.repository = new PostgresRepository<OutreachSequence, SequenceSnapshot, SequenceId>(
-      { pool: config.pool, tableName: 'outreach.sequences' },
-      {
-        toSnapshot: (entity) => ({
-          id: entity.id,
-          tenantId: entity.tenantId,
-          campaignId: entity.campaignId,
-          leadId: entity.leadId,
-          recipient: entity.recipient,
-          steps: entity.steps,
-          status: entity.status,
-          currentStepIndex: entity.currentStepIndex,
-          nextDueAt: entity.nextDueAt,
-          responseDeadlineAt: entity.responseDeadlineAt,
-          workflowId: entity.workflowId,
-          workflowStartedAt: entity.workflowStartedAt,
-          createdAt: entity.createdAt,
-          updatedAt: entity.updatedAt,
-        }),
-        fromSnapshot: (snapshot, id, tenantId, version) =>
-          OutreachSequence.reconstitute(
-            {
-              ...snapshot,
-              id,
-              tenantId: tenantId as TenantId,
-              leadId: snapshot.leadId as LeadId,
-              recipient: snapshot.recipient as Recipient,
-              steps: snapshot.steps as SequenceStep[],
-              status: snapshot.status as SequenceStatus,
-              nextDueAt: toDate(snapshot.nextDueAt),
-              responseDeadlineAt: toDate(snapshot.responseDeadlineAt),
-              workflowId: snapshot.workflowId,
-              workflowStartedAt: toDate(snapshot.workflowStartedAt),
-              createdAt: toDate(snapshot.createdAt),
-              updatedAt: toDate(snapshot.updatedAt),
-            },
-            version,
-          ),
-      },
-    );
-  }
-
-  async save(ctx: TenantContext, sequence: OutreachSequence): Promise<void> {
-    ensureSameTenant(ctx, sequence.tenantId);
-    await this.repository.save(ctx, sequence);
-  }
-
-  async load(ctx: TenantContext, sequenceId: SequenceId): Promise<OutreachSequence | null> {
-    return this.repository.findById(ctx, sequenceId);
-  }
-
-  async findByCampaign(ctx: TenantContext, campaignId: CampaignId): Promise<OutreachSequence[]> {
-    const result = await this.client.withTenant(ctx, async (client) => {
-      return client.query(
-        `SELECT payload, version FROM outreach.sequences WHERE tenant_id = $1 AND campaign_id = $2`,
-        [ctx.tenantId as string, campaignId],
-      );
-    });
-
-    return result.rows.map((row) => {
-      const snapshot = row.payload as SequenceSnapshot;
-      return OutreachSequence.reconstitute(
-        {
-          ...snapshot,
-          tenantId: ctx.tenantId as TenantId,
-          leadId: snapshot.leadId as LeadId,
-          recipient: snapshot.recipient as Recipient,
-          steps: snapshot.steps as SequenceStep[],
-          status: snapshot.status as SequenceStatus,
-          nextDueAt: toDate(snapshot.nextDueAt),
-          responseDeadlineAt: toDate(snapshot.responseDeadlineAt),
-          workflowId: snapshot.workflowId,
-          workflowStartedAt: toDate(snapshot.workflowStartedAt),
-          createdAt: toDate(snapshot.createdAt),
-          updatedAt: toDate(snapshot.updatedAt),
-        },
-        row.version as number,
-      );
-    });
-  }
-}
-
-type SequenceSnapshot = {
-  id?: SequenceId;
-  tenantId?: string & { readonly __brand: 'TenantId' };
-  campaignId: CampaignId;
-  leadId: string;
-  recipient: unknown;
-  steps: unknown[];
-  status: string;
-  currentStepIndex: number;
-  nextDueAt?: Date;
-  responseDeadlineAt?: Date;
-  workflowId?: string;
-  workflowStartedAt?: Date;
-  createdAt: Date;
-  updatedAt: Date;
-};
+type Snapshot={id?:SequenceId;tenantId?:TenantId;workspaceId:string;campaignId:CampaignId;leadId:string;contactId:string;steps:unknown[];status:string;currentStepIndex:number;nextDueAt?:Date;responseDeadlineAt?:Date;workflowId?:string;workflowStartedAt?:Date;createdAt:Date;updatedAt:Date};
+const snap=(e:OutreachSequence):Snapshot=>({id:e.id,tenantId:e.tenantId,workspaceId:e.workspaceId,campaignId:e.campaignId,leadId:e.leadId,contactId:e.contactId,steps:e.steps,status:e.status,currentStepIndex:e.currentStepIndex,nextDueAt:e.nextDueAt,responseDeadlineAt:e.responseDeadlineAt,workflowId:e.workflowId,workflowStartedAt:e.workflowStartedAt,createdAt:e.createdAt,updatedAt:e.updatedAt});
+function restore(r:any):OutreachSequence{const s=r.payload as Snapshot;return OutreachSequence.reconstitute({...s,id:r.id,tenantId:r.tenant_id as TenantId,workspaceId:r.workspace_id,campaignId:r.campaign_id as CampaignId,leadId:r.lead_id as LeadId,contactId:r.contact_id,recipientFingerprint:r.recipient_fingerprint??undefined,recipientCiphertext:r.recipient_ciphertext??undefined,recipientProtectionState:r.recipient_protection_state as RecipientProtectionState,steps:s.steps as SequenceStep[],status:s.status as SequenceStatus,nextDueAt:toDate(s.nextDueAt),responseDeadlineAt:toDate(s.responseDeadlineAt),workflowStartedAt:toDate(s.workflowStartedAt),createdAt:toDate(s.createdAt),updatedAt:toDate(s.updatedAt)},r.version);}
+export interface PostgresSequenceRepositoryConfig{pool:Pool}
+export class PostgresSequenceRepository implements ISequenceRepository{private readonly db:PostgresClient;constructor(c:PostgresSequenceRepositoryConfig){this.db=new PostgresClient(c.pool);}async load(ctx:OutreachRepositoryContext,id:SequenceId){return this.db.withTenant(ctx,async c=>{const r=await c.query('SELECT * FROM outreach.sequences WHERE tenant_id=$1 AND workspace_id=$2 AND id=$3',[ctx.tenantId,ctx.workspaceId,id]);return r.rows[0]?restore(r.rows[0]):null;});}async findByCampaign(ctx:OutreachRepositoryContext,id:CampaignId){return this.db.withTenant(ctx,async c=>(await c.query('SELECT * FROM outreach.sequences WHERE tenant_id=$1 AND workspace_id=$2 AND campaign_id=$3',[ctx.tenantId,ctx.workspaceId,id])).rows.map(restore));}async save(ctx:OutreachRepositoryContext,e:OutreachSequence){if(e.tenantId!==ctx.tenantId)throw new TenantIsolationError('Sequence tenant mismatch');if(e.workspaceId!==ctx.workspaceId)throw new AuthorizationError('Sequence workspace mismatch');const p=JSON.stringify(snap(e));await this.db.withTenant(ctx,async c=>{if(e.loadedVersion===undefined){const r=await c.query('INSERT INTO outreach.sequences (tenant_id,workspace_id,id,campaign_id,lead_id,contact_id,recipient_fingerprint,recipient_ciphertext,recipient_protection_state,payload,version,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW()) ON CONFLICT DO NOTHING RETURNING id',[ctx.tenantId,ctx.workspaceId,e.id,e.campaignId,e.leadId,e.contactId,e.recipientFingerprint??null,e.recipientCiphertext??null,e.recipientProtectionState,p,e.version]);if(!r.rowCount)throw new ConcurrencyConflictError('Sequence exists',String(ctx.tenantId),String(e.id),undefined);}else{const r=await c.query('UPDATE outreach.sequences SET payload=$4,version=$5,updated_at=NOW() WHERE tenant_id=$1 AND workspace_id=$2 AND id=$3 AND version=$6',[ctx.tenantId,ctx.workspaceId,e.id,p,e.version,e.loadedVersion]);if(!r.rowCount)throw new ConcurrencyConflictError('Stale sequence or wrong workspace',String(ctx.tenantId),String(e.id),e.loadedVersion);}});e.setVersion(e.version);}}

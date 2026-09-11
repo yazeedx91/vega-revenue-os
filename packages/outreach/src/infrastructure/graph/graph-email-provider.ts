@@ -64,9 +64,6 @@ export class GraphEmailProvider implements IEmailProvider {
     this.emitInfo('GRAPH_EMAIL_PROVIDER_SEND_INVOKED', {
       providerId: this.providerId,
       channel: this.channel,
-      senderAddress: this.config.senderAddress,
-      recipientAddress: request.recipientAddress,
-      subject: request.subject,
       liveEnabled,
     });
 
@@ -74,8 +71,6 @@ export class GraphEmailProvider implements IEmailProvider {
     if (alreadyAccepted) {
       this.emitInfo('GRAPH_EMAIL_PROVIDER_DUPLICATE_SKIPPED', {
         providerId: this.providerId,
-        senderAddress: this.config.senderAddress,
-        recipientAddress: request.recipientAddress,
         idempotencyKey: request.idempotencyKey,
         providerMessageId: alreadyAccepted.providerMessageId,
         internetMessageId: alreadyAccepted.internetMessageId,
@@ -126,8 +121,6 @@ export class GraphEmailProvider implements IEmailProvider {
       });
       this.emitInfo('GRAPH_SENDMAIL_RESPONSE', {
         providerId: this.providerId,
-        senderAddress: this.config.senderAddress,
-        recipientAddress: request.recipientAddress,
         status: response.status,
       });
 
@@ -159,8 +152,6 @@ export class GraphEmailProvider implements IEmailProvider {
         this.accepted.set(request.idempotencyKey as string, { providerMessageId, internetMessageId });
         this.emitInfo('GRAPH_EMAIL_PROVIDER_SEND_RESULT', {
           providerId: this.providerId,
-          senderAddress: this.config.senderAddress,
-          recipientAddress: request.recipientAddress,
           status: 'PROVIDER_ACCEPTED',
           providerMessageId,
           internetMessageId,
@@ -180,8 +171,6 @@ export class GraphEmailProvider implements IEmailProvider {
       if (classified.classification === 'NON_RETRYABLE' && response.status !== 429) {
         this.emitInfo('GRAPH_EMAIL_PROVIDER_SEND_RESULT', {
           providerId: this.providerId,
-          senderAddress: this.config.senderAddress,
-          recipientAddress: request.recipientAddress,
           status: 'FAILED',
           providerErrorCode: classified.errorCode,
         });
@@ -200,8 +189,6 @@ export class GraphEmailProvider implements IEmailProvider {
       const ambiguousCode = classified.classification === 'RATE_LIMITED' ? 'GRAPH_RATE_LIMITED_AMBIGUOUS' : 'GRAPH_SERVER_ERROR_AMBIGUOUS';
       this.emitInfo('GRAPH_EMAIL_PROVIDER_SEND_RESULT', {
         providerId: this.providerId,
-        senderAddress: this.config.senderAddress,
-        recipientAddress: request.recipientAddress,
         status: 'AMBIGUOUS',
         providerErrorCode: ambiguousCode,
       });
@@ -228,8 +215,6 @@ export class GraphEmailProvider implements IEmailProvider {
       }
       this.emitInfo('GRAPH_EMAIL_PROVIDER_SEND_RESULT', {
         providerId: this.providerId,
-        senderAddress: this.config.senderAddress,
-        recipientAddress: request.recipientAddress,
         status: 'AMBIGUOUS',
         providerErrorCode,
       });

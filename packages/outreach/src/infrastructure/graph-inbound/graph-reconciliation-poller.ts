@@ -97,6 +97,7 @@ export class GraphReconciliationPoller {
       processed.push(
         toCanonicalReplyIngressEvent(normalized.event, {
           tenantId: tenantConfig.tenantId,
+          workspaceId: correlation.execution.workspaceId,
           leadId: asLeadId(correlation.execution.leadId),
           campaignId: correlation.execution.campaignId as string,
           sequenceId: correlation.execution.sequenceId as string,

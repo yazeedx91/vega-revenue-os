@@ -7,7 +7,7 @@ export interface ApprovalVerificationRequest {
   readonly sequenceId: SequenceId;
   readonly executionId: OutreachExecutionId;
   readonly idempotencyKey: IdempotencyKey;
-  readonly recipientAddress: string;
+  readonly recipientFingerprint: string;
   readonly actionType: string;
   readonly correlationId: CorrelationId;
 }

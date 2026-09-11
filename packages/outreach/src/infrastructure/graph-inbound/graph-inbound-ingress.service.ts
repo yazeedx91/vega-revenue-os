@@ -119,6 +119,7 @@ export class GraphInboundIngressService {
 
     const event = toCanonicalReplyIngressEvent(normalizationOutcome.event, {
       tenantId: tenantOutcome.config.tenantId,
+      workspaceId: correlation.execution.workspaceId,
       leadId: asLeadId(correlation.execution.leadId),
       campaignId: correlation.execution.campaignId as string,
       sequenceId: correlation.execution.sequenceId as string,

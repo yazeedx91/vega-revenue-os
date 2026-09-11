@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as readline from 'readline';
@@ -9,15 +9,18 @@ import {
   OutreachCampaign,
   OutreachSequence,
   type OutreachPlan,
-  type Recipient,
+  type ProtectedRecipientSnapshot,
   type ResearchEvidence,
   type SequenceStep,
   type TenantContext,
 } from '@projectx/domain';
 import {
+  AzureKeyVaultSecretsProvider,
+  EnvironmentSecretsProvider,
   loadControlledCommunicationConfig,
   type ControlledCommunicationConfig,
   validateControlledCommunicationConfig,
+  type ISecretsProvider,
   type IWorkflowClient,
 } from '@projectx/infrastructure';
 import {
@@ -27,8 +30,10 @@ import {
   PostgresSequenceRepository,
   PostgresSuppressionRepository,
   OutreachSequenceLifecycleService,
+  RepositoryOutboundRecipientSource,
   type ICampaignRepository,
   type IMessageExecutionRepository,
+  type IOutboundRecipientSource,
   type IRecipientAllowlistRepository,
   type ISequenceRepository,
   type ISuppressionRepository,
@@ -40,6 +45,13 @@ import {
   type INotificationPort,
 } from '@projectx/mission-orchestrator';
 import { PostgresLeadRepository, type ILeadRepository } from '@projectx/conversation';
+import { PostgresContactRepository } from '@projectx/intelligence';
+import {
+  HistoricalRecipientFingerprint,
+  OutboundRecipientRecovery,
+  type IHistoricalRecipientFingerprint,
+  type IOutboundRecipientRecovery,
+} from '@projectx/application';
 import {
   asAccountId,
   asCampaignId,
@@ -47,6 +59,7 @@ import {
   asCorrelationId,
   asEventId,
   asICPProfileId,
+  asICPProfileVersionId,
   asIdempotencyKey,
   asLeadId,
   asOutreachExecutionId,
@@ -86,6 +99,10 @@ export interface Phase14RealSendOperatorConfig {
   lifecycleService: OutreachSequenceLifecycleService;
   approvalApplicationService: ApprovalApplicationService;
   workflowClient: IWorkflowClient;
+  recipientSource: IOutboundRecipientSource;
+  recipientRecovery: IOutboundRecipientRecovery;
+  historicalRecipientFingerprint: IHistoricalRecipientFingerprint;
+  workspaceId?: string;
   operatorId?: string;
   stateFilePath?: string;
   confirm?: (message: string) => Promise<boolean>;
@@ -103,17 +120,9 @@ function buildPlan(
   campaignId: ReturnType<typeof asCampaignId>,
   sequenceId: ReturnType<typeof asSequenceId>,
   leadId: ReturnType<typeof asLeadId>,
-  recipientAddress: string,
-  contactId: ReturnType<typeof asContactId>,
+  recipient: ProtectedRecipientSnapshot,
+  workspaceId: string,
 ): OutreachPlan {
-  const recipient: Recipient = {
-    contactId,
-    name: recipientAddress,
-    email: recipientAddress,
-    channel: 'email',
-    address: recipientAddress,
-  };
-
   const steps: SequenceStep[] = [
     {
       stepNumber: 1,
@@ -174,12 +183,14 @@ export class Phase14RealSendOperator {
     }
 
     if (!recipientAddress || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientAddress)) {
-      throw new Error(`Invalid recipient email address: ${recipientAddress}`);
+      throw new Error('Invalid recipient email address supplied to prepare.');
     }
 
     await this.ensureAllowlistAndNotSuppressed(ctx, recipientAddress);
 
     const tenantId = ctx.tenantId as string;
+    const workspaceId = this.config.workspaceId ?? tenantId;
+    const workspaceCtx = { ...ctx, workspaceId };
     const campaignId = asCampaignId(`phase14-8-campaign-${tenantId}-${Date.now()}`);
     const sequenceId = asSequenceId(`phase14-8-sequence-${tenantId}-${Date.now()}`);
     const leadId = asLeadId(`phase14-8-lead-${tenantId}-${recipientAddress}`);
@@ -189,9 +200,11 @@ export class Phase14RealSendOperator {
       {
         id: leadId,
         tenantId: ctx.tenantId,
+        workspaceId,
         accountId: asAccountId('phase14-8-test-account'),
         contactId: contactIdTyped,
         icpProfileId: asICPProfileId('phase14-8-test-icp'),
+        icpProfileVersionId: asICPProfileVersionId('phase14-8-test-icp-v1'),
         scores: {
           icpMatch: 1,
           signalScore: 1,
@@ -206,17 +219,27 @@ export class Phase14RealSendOperator {
       this.newEventId(),
     );
 
-    await this.config.leadRepository.save(ctx, lead);
+    await this.config.leadRepository.save(workspaceCtx, lead);
 
-    const plan = buildPlan(campaignId, sequenceId, leadId, recipientAddress, contactIdTyped);
+    const recipient = await this.config.recipientSource.resolveProtectedEmailRecipient({
+      tenantId,
+      workspaceId,
+      leadId: leadId as string,
+      contactId: contactIdTyped as string,
+    });
+
+    const plan = buildPlan(campaignId, sequenceId, leadId, recipient, workspaceId);
 
     const campaign = OutreachCampaign.create(
       {
         id: campaignId,
         tenantId: ctx.tenantId,
+        workspaceId,
         missionId: 'phase14-8-first-real-send',
         leadId,
-        recipient: plan.recipient,
+        contactId: contactIdTyped as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         channel: 'email',
         steps: plan.steps,
       },
@@ -250,15 +273,19 @@ export class Phase14RealSendOperator {
       throw new Error(`Campaign cannot start: ${campaignStartResult.error.message}`);
     }
 
-    await this.config.campaignRepository.save(ctx, campaign);
+    await this.config.campaignRepository.save(workspaceCtx, campaign);
 
     const sequence = OutreachSequence.create(
       {
         id: sequenceId,
         tenantId: ctx.tenantId,
+        workspaceId,
         campaignId,
         leadId,
-        recipient: plan.recipient,
+        contactId: contactIdTyped as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientCiphertext: plan.recipient.recipientCiphertext,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         steps: plan.steps,
       },
       ctx.correlationId as ReturnType<typeof asCorrelationId>,
@@ -291,10 +318,10 @@ export class Phase14RealSendOperator {
       throw new Error(`Sequence cannot start: ${sequenceStartResult.error.message}`);
     }
 
-    await this.config.sequenceRepository.save(ctx, sequence);
+    await this.config.sequenceRepository.save(workspaceCtx, sequence);
 
     const startResult = await this.config.lifecycleService.startWorkflow(
-      ctx,
+      workspaceCtx,
       sequence,
       {
         plan,
@@ -308,7 +335,7 @@ export class Phase14RealSendOperator {
     const workflowId = startResult.workflowId;
 
     const execution = await this.waitForExecutionStatus(
-      ctx,
+      workspaceCtx,
       sequenceId,
       ['PENDING_APPROVAL'],
       this.config.prepareWaitMs ?? DEFAULT_PREPARE_WAIT_MS,
@@ -327,8 +354,11 @@ export class Phase14RealSendOperator {
 
     await this.writeState({
       tenantId,
-      recipientAddress,
+      workspaceId,
       contactId: contactIdTyped as string,
+      recipientFingerprint: recipient.recipientFingerprint,
+      recipientCiphertext: recipient.recipientCiphertext,
+      recipientProtectionState: recipient.recipientProtectionState,
       campaignId: result.campaignId,
       sequenceId: result.sequenceId,
       workflowId: result.workflowId,
@@ -364,30 +394,62 @@ export class Phase14RealSendOperator {
     }
 
     const typedSequenceId = asSequenceId(sequenceId);
-    const sequence = await this.config.sequenceRepository.load(ctx, typedSequenceId);
+    const workspaceId = state?.workspaceId ?? this.config.workspaceId ?? (ctx.tenantId as string);
+    const tenantId = ctx.tenantId as string;
+    const workspaceCtx = { ...ctx, workspaceId };
+    const sequence = await this.config.sequenceRepository.load(workspaceCtx, typedSequenceId);
     if (!sequence) {
       throw new Error(`Sequence ${sequenceId} not found`);
     }
 
-    const recipientAddress = state?.recipientAddress || sequence.recipient.address;
-    if (!recipientAddress) {
-      throw new Error('Recipient address not available for re-verification');
+    if (!state?.recipientCiphertext || !state?.recipientFingerprint) {
+      throw new Error('Protected recipient snapshot not available for re-verification');
     }
 
-    await this.ensureAllowlistAndNotSuppressed(ctx, recipientAddress);
+    let recoveredAddress: string | undefined;
+    try {
+      recoveredAddress = await this.config.recipientRecovery.recoverEmailForSend(tenantId, state.recipientCiphertext);
+    } catch (err) {
+      throw new Error('Recipient recovery failed: cannot send without a valid protected snapshot');
+    }
 
-    const executions = await this.config.executionRepository.findBySequence(ctx, typedSequenceId);
+    const keyVersion = this.extractKeyVersion(state.recipientFingerprint);
+    if (!keyVersion) {
+      throw new Error('Invalid recipient fingerprint: cannot determine key version');
+    }
+
+    let recomputedFingerprint: string;
+    try {
+      recomputedFingerprint = await this.config.historicalRecipientFingerprint.fingerprintEmailForVersion(
+        tenantId,
+        recoveredAddress,
+        keyVersion,
+      );
+    } catch {
+      throw new Error('Recipient fingerprint re-computation failed');
+    }
+
+    if (Buffer.from(state.recipientFingerprint).length !== Buffer.from(recomputedFingerprint).length) {
+      throw new Error('Recipient fingerprint mismatch: recovered address does not match the protected snapshot');
+    }
+    if (!timingSafeEqual(Buffer.from(state.recipientFingerprint), Buffer.from(recomputedFingerprint))) {
+      throw new Error('Recipient fingerprint mismatch: recovered address does not match the protected snapshot');
+    }
+
+    await this.ensureAllowlistAndNotSuppressed(workspaceCtx, recoveredAddress);
+
+    const executions = await this.config.executionRepository.findBySequence(workspaceCtx, typedSequenceId);
     const pendingExecution = executions.find(
       (e) => e.status === 'PENDING_APPROVAL' || e.status === 'DRAFTING' || e.status === 'PENDING',
     );
     if (!pendingExecution) {
       throw new Error(
-        `No pending execution found for sequence ${sequenceId}. Ensure PREPARE succeeded and the workflow is waiting for approval.`,
+        'No pending execution found for the prepared sequence. Ensure PREPARE succeeded and the workflow is waiting for approval.',
       );
     }
 
     const confirmed = await this.promptForConfirmation(
-      `You are about to send a REAL email to ${recipientAddress} using sequence ${sequenceId}. ` +
+      `You are about to send a REAL email to ${recoveredAddress} using sequence ${sequenceId}. ` +
         `Live email is enabled. Type YES to proceed: `,
     );
     if (!confirmed) {
@@ -397,7 +459,7 @@ export class Phase14RealSendOperator {
     const executionId = pendingExecution.id;
     const actionType = 'OUTREACH_EMAIL_SEND';
 
-    const approvalId = await this.config.approvalApplicationService.requestApproval(ctx, {
+    const approvalId = await this.config.approvalApplicationService.requestApproval(workspaceCtx, {
       missionId: 'phase14-8-first-real-send',
       sequenceId,
       executionId: executionId as string,
@@ -407,7 +469,8 @@ export class Phase14RealSendOperator {
         campaignId: sequence.campaignId,
         sequenceId,
         executionId: executionId as string,
-        recipientAddress,
+        contactId: state.contactId,
+        recipientFingerprint: state.recipientFingerprint,
         channel: 'email',
       },
       evidence: [
@@ -426,7 +489,7 @@ export class Phase14RealSendOperator {
       ),
     });
 
-    await this.config.approvalApplicationService.approve(ctx, {
+    await this.config.approvalApplicationService.approve(workspaceCtx, {
       approvalId,
       decision: 'APPROVED',
       reason: 'Operator confirmed real email send via phase14:execute-real-send',
@@ -434,7 +497,7 @@ export class Phase14RealSendOperator {
     });
 
     const terminalExecution = await this.waitForExecutionStatus(
-      ctx,
+      workspaceCtx,
       typedSequenceId,
       ['PROVIDER_ACCEPTED', 'DELIVERY_PENDING', 'DELIVERED', 'REPLIED', 'FAILED', 'FAILED_PRE_SUBMISSION', 'DELIVERY_FAILED', 'DELIVERY_UNKNOWN', 'REQUIRES_RECONCILIATION', 'CANCELLED'],
       this.config.executeWaitMs ?? DEFAULT_EXECUTE_WAIT_MS,
@@ -476,14 +539,14 @@ export class Phase14RealSendOperator {
     const allowed = await this.config.allowlistRepository.isAllowed(ctx, 'email', recipientAddress);
     if (!allowed) {
       throw new Error(
-        `Recipient ${recipientAddress} is NOT in the allowlist. Add it before running Phase 14.8.`,
+        'Recipient is NOT in the allowlist. Add it before running Phase 14.8.',
       );
     }
 
     const suppressed = await this.config.suppressionRepository.isSuppressed(ctx, recipientAddress);
     if (suppressed) {
       throw new Error(
-        `Recipient ${recipientAddress} is on the suppression list (${suppressed.suppressionType}). Cannot proceed.`,
+        `Recipient is on the suppression list (${suppressed.suppressionType}). Cannot proceed.`,
       );
     }
   }
@@ -558,6 +621,12 @@ export class Phase14RealSendOperator {
     }
   }
 
+  private extractKeyVersion(fingerprint: string): string | undefined {
+    const parts = fingerprint.split('.');
+    if (parts.length < 3) return undefined;
+    return parts[1];
+  }
+
   private newEventId(): ReturnType<typeof asEventId> {
     return asEventId(`evt-${Date.now()}-${randomUUID().slice(0, 8)}`);
   }
@@ -565,8 +634,11 @@ export class Phase14RealSendOperator {
 
 interface Phase14RealSendState {
   tenantId: string;
-  recipientAddress: string;
+  workspaceId: string;
   contactId: string;
+  recipientFingerprint: string;
+  recipientCiphertext: string;
+  recipientProtectionState: string;
   campaignId: string;
   sequenceId: string;
   workflowId: string;
@@ -583,6 +655,14 @@ export function createPhase14RealSendOperatorFromEnv(
   }
 
   const pool = new Pool({ connectionString: config.databaseUrl });
+
+  const isProduction = (): boolean => process.env.NODE_ENV === 'production';
+  const secretsProvider: ISecretsProvider = config.azureKeyVaultUrl
+    ? new AzureKeyVaultSecretsProvider({ vaultUrl: config.azureKeyVaultUrl })
+    : new EnvironmentSecretsProvider();
+  if (isProduction() && !config.azureKeyVaultUrl) {
+    throw new Error('AZURE_KEY_VAULT_URL is required in production; EnvironmentSecretsProvider is not allowed');
+  }
 
   const campaignRepository = new PostgresCampaignRepository({ pool });
   const sequenceRepository = new PostgresSequenceRepository({ pool });
@@ -614,6 +694,14 @@ export function createPhase14RealSendOperatorFromEnv(
     generateApprovalId: () => `approval-${Date.now()}-${randomUUID().slice(0, 8)}`,
   });
 
+  const recipientSource = new RepositoryOutboundRecipientSource({
+    leadRepository,
+    contactRepository: new PostgresContactRepository({ pool }),
+  });
+
+  const recipientRecovery = new OutboundRecipientRecovery(secretsProvider);
+  const historicalRecipientFingerprint = new HistoricalRecipientFingerprint(secretsProvider);
+
   return new Phase14RealSendOperator({
     config,
     campaignRepository,
@@ -626,6 +714,10 @@ export function createPhase14RealSendOperatorFromEnv(
     lifecycleService,
     approvalApplicationService,
     workflowClient,
+    recipientSource,
+    recipientRecovery,
+    historicalRecipientFingerprint,
+    workspaceId: process.env.PHASE14_WORKSPACE_ID,
     operatorId: process.env.PHASE14_OPERATOR_ID,
     stateFilePath: process.env.PHASE14_STATE_FILE,
     confirm:
@@ -666,7 +758,6 @@ async function run(): Promise<void> {
 
       console.log('\n=== Phase 14.8 PREPARE complete ===');
       console.log(`tenantId:           ${tenantId}`);
-      console.log(`recipientAddress:   ${recipient}`);
       console.log(`campaignId:         ${result.campaignId}`);
       console.log(`sequenceId:         ${result.sequenceId}`);
       console.log(`executionId:        ${result.executionId ?? '<pending>'}`);

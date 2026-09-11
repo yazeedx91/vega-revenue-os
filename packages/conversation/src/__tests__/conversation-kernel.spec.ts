@@ -14,14 +14,16 @@ import { NoOpPIIScrubber } from '../infrastructure/no-op-pii-scrubber';
 import { StubReplyIngress } from '../infrastructure/stub-reply-ingress';
 
 const tenantA = 'tenant-a';
+const workspaceId = '00000000-0000-4000-8000-000000000001';
 
-function ctx(correlationId = `corr-${randomUUID()}`): TenantContext {
-  return { tenantId: tenantA as any, correlationId: correlationId as any };
+function ctx(correlationId = `corr-${randomUUID()}`): TenantContext & { workspaceId: string } {
+  return { tenantId: tenantA as any, workspaceId, correlationId: correlationId as any };
 }
 
 function makeLead(tenantId = tenantA): Lead {
   return Lead.create({
     tenantId: tenantId as any,
+    workspaceId,
     accountId: asAccountId('acc-1'),
     contactId: asContactId('contact-1'),
     icpProfileId: asICPProfileId('icp-1'),
@@ -205,6 +207,7 @@ describe('ConversationHandlingService', () => {
 
     const handle = await service.handleReply(c, {
       tenantId: tenantA,
+      workspaceId,
       leadId: lead.id,
       channel: 'email',
       providerMessageId: 'p-1',
@@ -231,6 +234,7 @@ describe('ConversationHandlingService', () => {
 
     const handle = await service.handleReply(c, {
       tenantId: tenantA,
+      workspaceId,
       leadId: lead.id,
       channel: 'email',
       providerMessageId: 'p-1',
@@ -324,7 +328,7 @@ describe('ConversationAgentExecutor', () => {
       taskId: 'task-1',
       taskType,
       correlationId: 'corr-1' as any,
-      context: { target: target as Record<string, unknown> } as ExecutionContext,
+      context: { authorization: { workspaceId }, target: target as Record<string, unknown> } as ExecutionContext,
       capabilities: [],
       policyContext: {
         autonomyLevel: 2,
@@ -344,6 +348,7 @@ describe('ConversationAgentExecutor', () => {
     const result = await executor.execute(
       makeRequest('handle-reply', {
         tenantId: tenantA,
+        workspaceId,
         leadId: asLeadId('lead-1'),
         channel: 'email',
         providerMessageId: 'p-1',
@@ -363,6 +368,7 @@ describe('ConversationAgentExecutor', () => {
 
     const handle = await service.handleReply(c, {
       tenantId: tenantA,
+      workspaceId,
       leadId: lead.id,
       channel: 'email',
       providerMessageId: 'p-1',

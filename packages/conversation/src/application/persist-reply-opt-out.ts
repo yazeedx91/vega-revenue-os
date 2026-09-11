@@ -30,16 +30,7 @@ export async function persistReplyBasedOptOut(
   event: ReplyIngressEvent,
   deps: PersistReplyOptOutDeps,
 ): Promise<void> {
-  let recipientAddress: string | undefined;
-
-  if (event.executionId) {
-    const execution = await deps.messageExecutionRepository.load(ctx, event.executionId as unknown as OutreachExecutionId);
-    recipientAddress = execution?.recipientAddress;
-  }
-
-  if (!recipientAddress) {
-    recipientAddress = event.sender;
-  }
+  const recipientAddress = event.sender;
 
   if (!recipientAddress) {
     return;

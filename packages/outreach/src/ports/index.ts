@@ -4,6 +4,8 @@ export * from './linkedin-provider.interface';
 export * from './calendar-provider.interface';
 export * from './outreach-provider-registry.interface';
 export * from './outreach-repository.interface';
+export * from './outbound-recipient-source.interface';
+export * from './outbound-recipient-recovery.interface';
 export * from './sequence-schedule-policy.interface';
 export * from './recipient-allowlist-repository.interface';
 export * from './suppression-repository.interface';

@@ -1,38 +1,10 @@
-import type { Conversation, ConversationId, TenantContext } from '@projectx/domain';
-import type { IConversationRepository } from '../ports/conversation-repository.interface';
+import { AuthorizationError, TenantIsolationError, type Conversation, type ConversationId } from '@projectx/domain';
+import type { ConversationRepositoryContext, IConversationRepository } from '../ports/conversation-repository.interface';
 
 export class InMemoryConversationRepository implements IConversationRepository {
   private readonly store = new Map<string, Conversation>();
-
-  private key(tenantId: string, id: string): string {
-    return `${tenantId}:${id}`;
-  }
-
-  async load(ctx: TenantContext, id: ConversationId): Promise<Conversation | null> {
-    return this.store.get(this.key(ctx.tenantId as string, id)) ?? null;
-  }
-
-  async save(ctx: TenantContext, conversation: Conversation): Promise<void> {
-    if (conversation.tenantId !== ctx.tenantId) {
-      throw new Error('Tenant mismatch');
-    }
-    this.store.set(this.key(ctx.tenantId as string, conversation.id), conversation);
-  }
-
-  async findByLeadAndChannel(
-    ctx: TenantContext,
-    leadId: string,
-    channel: string,
-  ): Promise<Conversation | null> {
-    for (const conversation of this.store.values()) {
-      if (
-        conversation.tenantId === ctx.tenantId &&
-        conversation.leadId === leadId &&
-        conversation.channel === channel
-      ) {
-        return conversation;
-      }
-    }
-    return null;
-  }
+  private key(ctx:ConversationRepositoryContext,id:string){return `${ctx.tenantId}:${ctx.workspaceId}:${id}`;}
+  async load(ctx:ConversationRepositoryContext,id:ConversationId){return this.store.get(this.key(ctx,id))??null;}
+  async save(ctx:ConversationRepositoryContext,c:Conversation){if(c.tenantId!==ctx.tenantId)throw new TenantIsolationError('Conversation tenant mismatch');if(c.workspaceId!==ctx.workspaceId)throw new AuthorizationError('Conversation workspace mismatch');this.store.set(this.key(ctx,c.id),c);}
+  async findByLeadAndChannel(ctx:ConversationRepositoryContext,leadId:string,channel:string){return [...this.store.values()].find(c=>c.tenantId===ctx.tenantId&&c.workspaceId===ctx.workspaceId&&c.leadId===leadId&&c.channel===channel)??null;}
 }

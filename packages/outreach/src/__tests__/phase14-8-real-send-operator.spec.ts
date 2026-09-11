@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import {
@@ -37,6 +38,7 @@ import {
   InMemorySequenceRepository,
   InMemorySuppressionRepository,
   OutreachSequenceLifecycleService,
+  type IOutboundRecipientSource,
 } from '@projectx/outreach';
 import {
   Phase14RealSendOperator,
@@ -51,6 +53,7 @@ const OPERATOR_ID = 'phase14-test-operator';
 function newCtx(correlationSuffix?: string): TenantContext {
   return {
     tenantId: asTenantId(TEST_TENANT),
+    workspaceId: 'workspace-1',
     correlationId: asCorrelationId(
       `corr-${correlationSuffix ?? randomUUID().slice(0, 8)}`,
     ),
@@ -159,6 +162,27 @@ function buildDependencies(liveEmailEnabled: boolean): {
   const suppressionRepository = new InMemorySuppressionRepository();
   const approvalRepository = new InMemoryApprovalRepository();
   const leadRepository = new InMemoryLeadRepository();
+  const recipientSource: IOutboundRecipientSource = {
+    async resolveProtectedEmailRecipient() {
+      return {
+        contactId: CONTACT_ID,
+        recipientFingerprint: 'h1.1.fingerprint123',
+        recipientCiphertext: 'e1.1.ciphertext456',
+        recipientProtectionState: 'PROTECTED',
+      };
+    },
+  };
+  const recipientRecovery = {
+    async recoverEmailForSend(_tenantId: string, recipientCiphertext: string): Promise<string> {
+      return recipientCiphertext === 'e1.1.ciphertext456' ? RECIPIENT : 'unknown@example.com';
+    },
+  };
+  const historicalRecipientFingerprint = {
+    async fingerprintEmailForVersion(_tenantId: string, rawEmail: string, keyVersion: string): Promise<string> {
+      if (rawEmail === RECIPIENT && keyVersion === '1') return 'h1.1.fingerprint123';
+      return `h1.${keyVersion}.unknown`;
+    },
+  };
   const workflowClient = new FakeWorkflowClient(executionRepository, TEST_TENANT);
 
   const lifecycleService = new OutreachSequenceLifecycleService({
@@ -207,6 +231,10 @@ function buildDependencies(liveEmailEnabled: boolean): {
     lifecycleService,
     approvalApplicationService,
     workflowClient,
+    recipientSource,
+    recipientRecovery,
+    historicalRecipientFingerprint,
+    workspaceId: 'workspace-1',
     operatorId: OPERATOR_ID,
     prepareWaitMs: 0,
     executeWaitMs: 0,
@@ -339,11 +367,15 @@ describe('Phase14RealSendOperator', () => {
     const execution = OutreachMessageExecution.create(
       {
         tenantId: ctx.tenantId,
+        workspaceId: 'workspace-1',
         campaignId: asCampaignId(prepareResult.campaignId),
         sequenceId: asSequenceId(prepareResult.sequenceId),
         stepNumber: 1,
         leadId: 'test-lead',
-        recipientAddress: RECIPIENT,
+        contactId: CONTACT_ID,
+        recipientFingerprint: 'h1.1.fingerprint123',
+        recipientCiphertext: 'e1.1.ciphertext456',
+        recipientProtectionState: 'PROTECTED',
         channel: 'email',
         idempotencyKey: asIdempotencyKey('test-idempotency-key'),
       },
@@ -380,5 +412,103 @@ describe('Phase14RealSendOperator', () => {
       deps.workflowClient.signals[0].payload.approvalId as string,
     );
     expect(approvals?.status).toBe('APPROVED');
+  });
+
+  it('restarts from protected state only and still targets the originally planned recipient', async () => {
+    const deps = buildDependencies(false);
+    const ctx = newCtx('restart-proof');
+    await deps.allowlistRepository.add(ctx, {
+      channel: 'email',
+      address: RECIPIENT,
+      approvedBy: OPERATOR_ID,
+      reason: 'test',
+    });
+
+    const stateFilePath = deps.operatorConfig.stateFilePath as string;
+
+    const firstOperator = new Phase14RealSendOperator(deps.operatorConfig);
+    const prepareResult = await firstOperator.prepare(ctx, RECIPIENT, CONTACT_ID);
+
+    const firstStateBytes = await fs.readFile(stateFilePath);
+    const firstStateText = firstStateBytes.toString('utf-8');
+    expect(firstStateText).not.toContain(RECIPIENT);
+    expect(firstStateText).not.toContain('recipientAddress');
+    expect(firstStateText).toContain('"recipientFingerprint"');
+    expect(firstStateText).toContain('"recipientCiphertext"');
+    expect(firstStateText).toContain('"recipientProtectionState"');
+    expect(firstStateText).toContain('"contactId"');
+    expect(firstStateText).toContain('"workspaceId"');
+
+    const NEW_RECIPIENT = 'new-recipient@example.com';
+
+    const restartedConfig = {
+      ...deps.operatorConfig,
+      recipientSource: {
+        async resolveProtectedEmailRecipient() {
+          return {
+            contactId: CONTACT_ID,
+            recipientFingerprint: 'h1.1.fingerprint-new',
+            recipientCiphertext: 'e1.1.ciphertext-new',
+            recipientProtectionState: 'PROTECTED',
+          };
+        },
+      },
+      // Keep the original recovery/fingerprint services bound to the originally planned recipient.
+      // A real implementation recovers from the state ciphertext, which still encodes the original recipient.
+      recipientRecovery: {
+        async recoverEmailForSend(_tenantId: string, recipientCiphertext: string): Promise<string> {
+          return recipientCiphertext === 'e1.1.ciphertext456' ? RECIPIENT : 'unknown@example.com';
+        },
+      },
+      historicalRecipientFingerprint: {
+        async fingerprintEmailForVersion(_tenantId: string, rawEmail: string, keyVersion: string): Promise<string> {
+          if (rawEmail === RECIPIENT && keyVersion === '1') return 'h1.1.fingerprint123';
+          if (rawEmail === NEW_RECIPIENT) throw new Error('Unexpected new recipient fingerprinted');
+          return `h1.${keyVersion}.unknown`;
+        },
+      },
+    };
+
+    const execution = OutreachMessageExecution.create(
+      {
+        tenantId: ctx.tenantId,
+        workspaceId: 'workspace-1',
+        campaignId: asCampaignId(prepareResult.campaignId),
+        sequenceId: asSequenceId(prepareResult.sequenceId),
+        stepNumber: 1,
+        leadId: 'test-lead',
+        contactId: CONTACT_ID,
+        recipientFingerprint: 'h1.1.fingerprint123',
+        recipientCiphertext: 'e1.1.ciphertext456',
+        recipientProtectionState: 'PROTECTED',
+        channel: 'email',
+        idempotencyKey: asIdempotencyKey('test-idempotency-key-restart'),
+      },
+      ctx.correlationId,
+      asEventId(`evt-${randomUUID().slice(0, 8)}`),
+    );
+    execution.startDrafting(ctx.correlationId, asEventId(`evt-${randomUUID().slice(0, 8)}`));
+    execution.setDraft(
+      asOutreachMessageId('internet-message-id-restart'),
+      { subject: 'Phase 14.8 restart test', body: 'body', cta: 'Reply' } as MessageDraft,
+      ctx.correlationId,
+      asEventId(`evt-${randomUUID().slice(0, 8)}`),
+    );
+    await deps.executionRepository.save(ctx, execution);
+
+    deps.operatorConfig.config = { ...deps.config, liveEmailEnabled: true };
+
+    restartedConfig.config = { ...deps.config, liveEmailEnabled: true };
+    const restartedOperator = new Phase14RealSendOperator(restartedConfig);
+    const executeResult = await restartedOperator.execute(ctx, prepareResult.sequenceId);
+
+    expect(executeResult.status).toBe('DELIVERY_PENDING');
+    expect(executeResult.executionId).toBe(execution.id as string);
+
+    const postExecuteStateBytes = await fs.readFile(stateFilePath);
+    const postExecuteStateText = postExecuteStateBytes.toString('utf-8');
+    expect(postExecuteStateText).not.toContain(RECIPIENT);
+    expect(postExecuteStateText).not.toContain(NEW_RECIPIENT);
+    expect(postExecuteStateText).not.toContain('recipientAddress');
   });
 });

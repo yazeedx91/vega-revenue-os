@@ -1,7 +1,7 @@
 import type { CampaignId, CorrelationId, EventId, LeadId, OutreachExecutionId, SequenceId, TenantId, UserId } from '@projectx/shared';
 import { fail, ok, type Result } from '@projectx/shared';
 import { AggregateRoot } from '../aggregate/aggregate-root';
-import type { Recipient } from './value-objects/recipient';
+import { assertProtectedRecipientSnapshot, type RecipientProtectionState } from './value-objects/protected-recipient';
 import type { SequenceStep } from './value-objects/sequence-step';
 import * as Events from './sequence-events';
 import { canTransitionSequence, type SequenceStatus } from './sequence-status';
@@ -9,9 +9,14 @@ import { canTransitionSequence, type SequenceStatus } from './sequence-status';
 export interface SequenceProps {
   id?: SequenceId;
   tenantId: TenantId;
+  workspaceId: string;
   campaignId: CampaignId;
   leadId: LeadId;
-  recipient: Recipient;
+  contactId: string;
+  recipientFingerprint?: string;
+  recipientCiphertext?: string;
+  recipientProtectionState: RecipientProtectionState;
+  campaignRecipientFingerprint?: string;
   steps: SequenceStep[];
   status?: SequenceStatus;
   currentStepIndex?: number;
@@ -31,9 +36,13 @@ export class SequenceInvariantError extends Error {
 }
 
 export class OutreachSequence extends AggregateRoot<SequenceId> {
+  public readonly workspaceId: string;
   public readonly campaignId: CampaignId;
   public readonly leadId: LeadId;
-  public readonly recipient: Recipient;
+  public readonly contactId: string;
+  public readonly recipientFingerprint?: string;
+  public readonly recipientCiphertext?: string;
+  public readonly recipientProtectionState: RecipientProtectionState;
   public readonly steps: SequenceStep[];
   public status: SequenceStatus;
   public currentStepIndex: number;
@@ -46,9 +55,13 @@ export class OutreachSequence extends AggregateRoot<SequenceId> {
 
   private constructor(props: SequenceProps) {
     super(props.tenantId, props.id!);
+    this.workspaceId = props.workspaceId;
     this.campaignId = props.campaignId;
     this.leadId = props.leadId;
-    this.recipient = props.recipient;
+    this.contactId = props.contactId;
+    this.recipientFingerprint = props.recipientFingerprint;
+    this.recipientCiphertext = props.recipientCiphertext;
+    this.recipientProtectionState = props.recipientProtectionState;
     this.steps = props.steps;
     this.status = props.status ?? 'DRAFT';
     this.currentStepIndex = props.currentStepIndex ?? 0;
@@ -65,6 +78,11 @@ export class OutreachSequence extends AggregateRoot<SequenceId> {
     correlationId: CorrelationId,
     eventId: EventId,
   ): OutreachSequence {
+    if (!props.contactId) throw new SequenceInvariantError('Contact is required');
+    assertProtectedRecipientSnapshot(props);
+    if (props.campaignRecipientFingerprint !== undefined && props.campaignRecipientFingerprint !== props.recipientFingerprint) {
+      throw new SequenceInvariantError('Campaign and Sequence recipient fingerprints must match');
+    }
     if (props.steps.length === 0) {
       throw new SequenceInvariantError('Sequence must have at least one step');
     }
