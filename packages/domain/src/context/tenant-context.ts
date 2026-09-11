@@ -5,6 +5,7 @@ import type { TenantId } from '@projectx/shared';
  */
 export interface TenantContext {
   readonly tenantId: TenantId;
+  readonly workspaceId?: string;
   readonly correlationId: string;
   readonly userId?: string;
   readonly agentId?: string;

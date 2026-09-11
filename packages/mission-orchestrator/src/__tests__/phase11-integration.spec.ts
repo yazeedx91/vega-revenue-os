@@ -176,6 +176,7 @@ function createEngine(tenantId: string) {
 
   const approvalService = new ApprovalApplicationService({
     approvalRepository,
+    missionRepository,
     notificationPort,
     workflowClient,
     idempotencyStore,
@@ -236,6 +237,8 @@ async function seedMissionAndProfile(ctx: TenantContext, deps: ReturnType<typeof
     {
       id: asMissionId('mission-1'),
       tenantId: ctx.tenantId,
+      workspaceId: 'ws-1',
+      workspaceBindingState: 'WORKSPACE_BOUND',
       name: 'Research Mission',
       objective: 'find qualified prospects',
       icpId: 'icp-1',
@@ -267,6 +270,7 @@ describe('Phase 11 mission integration', () => {
     const tenantId = asTenantId('tenant-1');
     const ctx: TenantContext = {
       tenantId,
+      workspaceId: 'ws-1',
       correlationId: asCorrelationId('corr-1'),
       userId: asUserId('owner-1'),
     };

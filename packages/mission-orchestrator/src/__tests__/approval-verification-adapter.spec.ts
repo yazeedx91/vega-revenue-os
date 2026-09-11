@@ -6,12 +6,14 @@ import { ApprovalVerificationAdapter } from '../infrastructure/approval-verifica
 
 describe('ApprovalVerificationAdapter', () => {
   const tenantId = asTenantId('tenant-1');
-  const ctx = { tenantId, correlationId: asCorrelationId('corr-1') };
+  const ctx = { tenantId, workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
 
   function makeApproval(overrides?: Partial<ApprovalProps>): Approval {
     const props: ApprovalProps = {
       id: 'approval-1' as unknown as ApprovalId,
       tenantId,
+      workspaceId: 'workspace-1',
+      workspaceBindingState: 'WORKSPACE_BOUND',
       missionId: 'mission-1',
       taskId: 'task-1',
       executionId: 'exec-1',
@@ -48,7 +50,7 @@ describe('ApprovalVerificationAdapter', () => {
     const repo = new InMemoryApprovalRepository();
     const approval = makeApproval();
     approval.approve('user-1' as any, 'looks good', asCorrelationId('c2'), asEventId('e2'));
-    await repo.save(approval);
+    await repo.save(ctx, approval);
 
     const adapter = new ApprovalVerificationAdapter(repo);
     const result = await adapter.verify(ctx, baseRequest);
@@ -69,7 +71,7 @@ describe('ApprovalVerificationAdapter', () => {
     const repo = new InMemoryApprovalRepository();
     const approval = makeApproval({ tenantId: asTenantId('tenant-other') });
     approval.approve('user-1' as any, 'ok', asCorrelationId('c2'), asEventId('e2'));
-    await repo.save(approval);
+    await repo.save({ ...ctx, tenantId: asTenantId('tenant-other') }, approval);
 
     const adapter = new ApprovalVerificationAdapter(repo);
     const result = await adapter.verify(ctx, baseRequest);
@@ -84,7 +86,7 @@ describe('ApprovalVerificationAdapter', () => {
     const repo = new InMemoryApprovalRepository();
     const approval = makeApproval({ executionId: 'a-different-execution' });
     approval.approve('user-1' as any, 'ok', asCorrelationId('c2'), asEventId('e2'));
-    await repo.save(approval);
+    await repo.save(ctx, approval);
 
     const adapter = new ApprovalVerificationAdapter(repo);
     const result = await adapter.verify(ctx, baseRequest);
@@ -96,7 +98,7 @@ describe('ApprovalVerificationAdapter', () => {
     const repo = new InMemoryApprovalRepository();
     const approval = makeApproval({ actionType: 'OUTREACH_LINKEDIN_SEND' });
     approval.approve('user-1' as any, 'ok', asCorrelationId('c2'), asEventId('e2'));
-    await repo.save(approval);
+    await repo.save(ctx, approval);
 
     const adapter = new ApprovalVerificationAdapter(repo);
     const result = await adapter.verify(ctx, baseRequest);
@@ -108,7 +110,7 @@ describe('ApprovalVerificationAdapter', () => {
     const repo = new InMemoryApprovalRepository();
     const approval = makeApproval();
     approval.reject('user-1' as any, 'no', asCorrelationId('c2'), asEventId('e2'));
-    await repo.save(approval);
+    await repo.save(ctx, approval);
 
     const adapter = new ApprovalVerificationAdapter(repo);
     const result = await adapter.verify(ctx, baseRequest);
@@ -119,7 +121,7 @@ describe('ApprovalVerificationAdapter', () => {
   it('returns PENDING when the approval has not yet been decided', async () => {
     const repo = new InMemoryApprovalRepository();
     const approval = makeApproval();
-    await repo.save(approval);
+    await repo.save(ctx, approval);
 
     const adapter = new ApprovalVerificationAdapter(repo);
     const result = await adapter.verify(ctx, baseRequest);
@@ -131,7 +133,7 @@ describe('ApprovalVerificationAdapter', () => {
     const repo = new InMemoryApprovalRepository();
     const approval = makeApproval();
     approval.escalate(asCorrelationId('c2'), asEventId('e2'));
-    await repo.save(approval);
+    await repo.save(ctx, approval);
 
     const adapter = new ApprovalVerificationAdapter(repo);
     const result = await adapter.verify(ctx, baseRequest);
@@ -143,7 +145,7 @@ describe('ApprovalVerificationAdapter', () => {
     const repo = new InMemoryApprovalRepository();
     const approval = makeApproval();
     approval.expire(asCorrelationId('c2'), asEventId('e2'));
-    await repo.save(approval);
+    await repo.save(ctx, approval);
 
     const adapter = new ApprovalVerificationAdapter(repo);
     const result = await adapter.verify(ctx, baseRequest);
@@ -155,7 +157,7 @@ describe('ApprovalVerificationAdapter', () => {
     const repo = new InMemoryApprovalRepository();
     const approval = makeApproval({ timeoutSeconds: 1, createdAt: new Date(Date.now() - 10_000) });
     approval.approve('user-1' as any, 'ok', asCorrelationId('c2'), asEventId('e2'));
-    await repo.save(approval);
+    await repo.save(ctx, approval);
 
     const adapter = new ApprovalVerificationAdapter(repo);
     const result = await adapter.verify(ctx, baseRequest);

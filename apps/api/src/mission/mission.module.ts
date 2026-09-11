@@ -20,6 +20,7 @@ import {
   type CorrelationId,
 } from '@projectx/shared';
 import { MissionController } from './mission.controller';
+import { IdentityModule } from '../identity/identity.module';
 
 const noOpEventBus: IEventBus = {
   publish: async () => {},
@@ -43,6 +44,7 @@ function noOpWorkflowClient(): IWorkflowClient {
 }
 
 @Module({
+  imports: [IdentityModule],
   controllers: [MissionController],
   providers: [
     {

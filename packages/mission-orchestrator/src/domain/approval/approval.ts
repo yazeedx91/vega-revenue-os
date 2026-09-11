@@ -8,6 +8,8 @@ import { canTransitionApproval, type ApprovalStatus } from './approval-status';
 export interface ApprovalProps {
   readonly id: ApprovalId;
   readonly tenantId: TenantId;
+  readonly workspaceId?: string;
+  readonly workspaceBindingState?: 'WORKSPACE_BOUND' | 'LEGACY_UNBOUND';
   readonly missionId: string;
   readonly sequenceId?: string;
   readonly taskId?: string;
@@ -31,6 +33,8 @@ export interface ApprovalProps {
 }
 
 export class Approval extends AggregateRoot<ApprovalId> {
+  public readonly workspaceId?: string;
+  public readonly workspaceBindingState: 'WORKSPACE_BOUND' | 'LEGACY_UNBOUND';
   public readonly missionId: string;
   public readonly sequenceId?: string;
   public readonly taskId?: string;
@@ -66,6 +70,8 @@ export class Approval extends AggregateRoot<ApprovalId> {
 
   private constructor(props: ApprovalProps) {
     super(props.tenantId, props.id);
+    this.workspaceId = props.workspaceId;
+    this.workspaceBindingState = props.workspaceBindingState ?? 'LEGACY_UNBOUND';
     this.missionId = props.missionId;
     this.sequenceId = props.sequenceId;
     this.taskId = props.taskId;
@@ -92,6 +98,9 @@ export class Approval extends AggregateRoot<ApprovalId> {
     props: ApprovalProps,
     eventId: EventId,
   ): Result<Approval, Error> {
+    if (props.workspaceBindingState !== 'WORKSPACE_BOUND' || !props.workspaceId) {
+      return fail(new Error('New Approval requires parent Mission workspace ownership'));
+    }
     const approval = new Approval(props);
     approval.applyEvent(
       new ApprovalRequested(

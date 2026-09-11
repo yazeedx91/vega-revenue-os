@@ -12,6 +12,8 @@ describe('PostgresApprovalRepository', () => {
       {
         id: 'approval-1' as string,
         tenantId,
+        workspaceId: 'workspace-1',
+        workspaceBindingState: 'WORKSPACE_BOUND',
         missionId: 'mission-1',
         taskId: 'task-1',
         executionId: 'exec-1',
@@ -33,6 +35,8 @@ describe('PostgresApprovalRepository', () => {
     return result.value;
   }
 
+  const ctx = { tenantId, workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
+
   function makeRepo() {
     return new PostgresApprovalRepository({ pool: new FakePgPool() as unknown as Pool });
   }
@@ -42,8 +46,8 @@ describe('PostgresApprovalRepository', () => {
     const approval = makeApproval();
     approval.approve(asUserId('user-1'), 'Looks good', asCorrelationId('corr-2'), asEventId('evt-2'));
 
-    await repo.save(approval);
-    const reloaded = await repo.load(tenantId, approval.id as string);
+    await repo.save(ctx, approval);
+    const reloaded = await repo.load(ctx, approval.id as string);
 
     expect(reloaded).not.toBeNull();
     expect(reloaded!.status).toBe('APPROVED');
@@ -57,15 +61,15 @@ describe('PostgresApprovalRepository', () => {
   it('rejects a stale-version save as a concurrency conflict', async () => {
     const repo = makeRepo();
     const approval = makeApproval();
-    await repo.save(approval);
+    await repo.save(ctx, approval);
 
-    const loaderA = await repo.load(tenantId, approval.id as string);
-    const loaderB = await repo.load(tenantId, approval.id as string);
+    const loaderA = await repo.load(ctx, approval.id as string);
+    const loaderB = await repo.load(ctx, approval.id as string);
 
     loaderA!.approve(asUserId('user-1'), 'ok', asCorrelationId('c2'), asEventId('e2'));
-    await repo.save(loaderA!);
+    await repo.save(ctx, loaderA!);
 
     loaderB!.reject(asUserId('user-2'), 'no', asCorrelationId('c3'), asEventId('e3'));
-    await expect(repo.save(loaderB!)).rejects.toThrow();
+    await expect(repo.save(ctx, loaderB!)).rejects.toThrow();
   });
 });

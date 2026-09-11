@@ -38,6 +38,7 @@ describe('MissionExecutionEngine', () => {
 
     const approvalService = new ApprovalApplicationService({
       approvalRepository,
+      missionRepository,
       workflowClient,
       notificationPort,
       generateEventId,

@@ -266,6 +266,7 @@ describe('Phase 14.8 approval-wait lifecycle (Temporal integration)', () => {
 
     approvalService = new ApprovalApplicationService({
       approvalRepository,
+      missionRepository: { findById: async (ctx, id) => ({ id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, workspaceBindingState: 'WORKSPACE_BOUND' }), save: async () => undefined } as never,
       workflowClient,
       notificationPort: { notifyApprovalRequested: async () => undefined },
       generateEventId: () => asEventId(`evt-${++seed}-${randomUUID().slice(0, 8)}`),

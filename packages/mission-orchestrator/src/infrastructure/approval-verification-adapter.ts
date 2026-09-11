@@ -21,7 +21,7 @@ export class ApprovalVerificationAdapter implements IApprovalVerificationPort {
   constructor(private readonly approvalRepository: IApprovalRepository) {}
 
   async verify(ctx: TenantContext, request: ApprovalVerificationRequest): Promise<ApprovalVerificationResult> {
-    const approval = await this.approvalRepository.load(ctx.tenantId, request.approvalId);
+    const approval = await this.approvalRepository.load(ctx, request.approvalId);
 
     if (!approval) {
       return { outcome: 'NOT_FOUND', reason: `Approval ${request.approvalId} not found` };

@@ -1,11 +1,12 @@
 import type { TenantContext } from '@projectx/domain';
-import { ensureSameTenant } from '@projectx/domain';
+import { AuthorizationError, ensureSameTenant } from '@projectx/domain';
 import type { CorrelationId, EventId, IdempotencyKey, UserId } from '@projectx/shared';
 import { WorkflowIdFactory } from '@projectx/shared';
 import type { ApprovalId } from '@projectx/domain';
 import type { IWorkflowClient } from '@projectx/infrastructure';
 import { Approval, type ApprovalProps } from '../domain/approval/approval';
 import type { IApprovalRepository } from '../ports/approval-repository.interface';
+import type { IMissionRepository } from '../ports/mission-repository.interface';
 import type { INotificationPort } from '../ports/notification-port.interface';
 import type { SubmitApprovalDecisionCommand, TimeoutApprovalCommand } from './contracts';
 
@@ -28,6 +29,7 @@ export interface RequestApprovalInput {
 
 export interface ApprovalApplicationDependencies {
   approvalRepository: IApprovalRepository;
+  missionRepository: IMissionRepository;
   workflowClient: IWorkflowClient;
   notificationPort: INotificationPort;
   generateEventId: () => EventId;
@@ -39,11 +41,18 @@ export class ApprovalApplicationService {
   constructor(private readonly deps: ApprovalApplicationDependencies) {}
 
   async requestApproval(ctx: TenantContext, input: RequestApprovalInput): Promise<string> {
+    if (!ctx.workspaceId) throw new AuthorizationError('Workspace access denied');
+    const mission = await this.deps.missionRepository.findById(ctx, input.missionId);
+    if (!mission || mission.workspaceBindingState !== 'WORKSPACE_BOUND' || mission.workspaceId !== ctx.workspaceId) {
+      throw new AuthorizationError('Mission access denied');
+    }
     const approvalId = this.deps.generateApprovalId();
     const props: ApprovalProps = {
       id: approvalId as unknown as ApprovalId,
-      tenantId: ctx.tenantId,
-      missionId: input.missionId,
+      tenantId: mission.tenantId,
+      workspaceId: mission.workspaceId,
+      workspaceBindingState: 'WORKSPACE_BOUND',
+      missionId: mission.id,
       sequenceId: input.sequenceId,
       taskId: input.taskId,
       executionId: input.executionId,
@@ -65,7 +74,7 @@ export class ApprovalApplicationService {
       throw new Error(`Cannot create approval: ${approvalResult.error.message}`);
     }
     const approval = approvalResult.value;
-    await this.deps.approvalRepository.save(approval);
+    await this.deps.approvalRepository.save(ctx, approval);
     await this.deps.notificationPort.notifyApprovalRequested(ctx, approval);
     return approvalId;
   }
@@ -85,7 +94,7 @@ export class ApprovalApplicationService {
     if (!result.success) {
       throw new Error(`Cannot expire approval: ${result.error.message}`);
     }
-    await this.deps.approvalRepository.save(approval);
+    await this.deps.approvalRepository.save(ctx, approval);
     await this.signalWorkflow(ctx, approval, 'EXPIRED', 'Approval timeout exceeded');
   }
 
@@ -104,14 +113,15 @@ export class ApprovalApplicationService {
     if (!result.success) {
       throw new Error(`Cannot ${status.toLowerCase()} approval: ${result.error.message}`);
     }
-    await this.deps.approvalRepository.save(approval);
+    await this.deps.approvalRepository.save(ctx, approval);
     await this.signalWorkflow(ctx, approval, status, cmd.reason);
   }
 
   private async loadApproval(ctx: TenantContext, approvalId: string): Promise<Approval> {
-    const approval = await this.deps.approvalRepository.load(ctx.tenantId, approvalId);
-    if (!approval) {
-      throw new Error(`Approval ${approvalId} not found`);
+    if (!ctx.workspaceId) throw new AuthorizationError('Workspace access denied');
+    const approval = await this.deps.approvalRepository.load(ctx, approvalId);
+    if (!approval || approval.workspaceBindingState !== 'WORKSPACE_BOUND' || approval.workspaceId !== ctx.workspaceId) {
+      throw new AuthorizationError('Approval access denied');
     }
     ensureSameTenant(ctx, approval.tenantId);
     return approval;

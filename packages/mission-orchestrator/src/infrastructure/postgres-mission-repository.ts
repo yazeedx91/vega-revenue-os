@@ -41,14 +41,15 @@ export class PostgresMissionRepository implements IMissionRepository {
   }
 
   async findById(ctx: TenantContext, missionId: string): Promise<Mission | null> {
+    if (!ctx.workspaceId) return null;
     return this.client.transaction(ctx, async (client) => {
       const missionResult = await client.query(
-        `SELECT id, tenant_id, owner_user_id, name, objective, icp_id, territory, channels,
+        `SELECT id, tenant_id, workspace_id, workspace_binding_state, owner_user_id, name, objective, icp_id, territory, channels,
                 budget, autonomy_level, constraints, success_criteria, deadline, status,
                 current_plan_version, outcomes, version, created_at, updated_at
          FROM mission.missions
-         WHERE id = $1::UUID`,
-        [missionId],
+         WHERE tenant_id = $1 AND workspace_id = $2 AND id = $3::UUID AND workspace_binding_state = 'WORKSPACE_BOUND'`,
+        [ctx.tenantId, ctx.workspaceId, missionId],
       );
 
       if (missionResult.rows.length === 0) {
@@ -149,6 +150,8 @@ export class PostgresMissionRepository implements IMissionRepository {
         {
           id: asMissionId(row.id as string),
           tenantId: tenant,
+          workspaceId: row.workspace_id as string,
+          workspaceBindingState: row.workspace_binding_state,
           name: row.name as string,
           objective: row.objective as string,
           icpId: row.icp_id as string,
@@ -176,10 +179,13 @@ export class PostgresMissionRepository implements IMissionRepository {
   }
 
   async save(ctx: TenantContext, mission: Mission): Promise<void> {
+    if (!ctx.workspaceId || mission.workspaceBindingState !== 'WORKSPACE_BOUND' || mission.workspaceId !== ctx.workspaceId || mission.tenantId !== ctx.tenantId) {
+      throw new Error('Mission workspace ownership mismatch');
+    }
     await this.client.transaction(ctx, async (client) => {
       const existing = await client.query(
-        `SELECT version, current_plan_version FROM mission.missions WHERE id = $1::UUID`,
-        [mission.id],
+        `SELECT version, current_plan_version FROM mission.missions WHERE tenant_id=$1 AND workspace_id=$2 AND id=$3::UUID`,
+        [ctx.tenantId, ctx.workspaceId, mission.id],
       );
 
       const dbVersion = existing.rows[0]?.version as number | undefined;
@@ -191,15 +197,17 @@ export class PostgresMissionRepository implements IMissionRepository {
       if (expectedVersion === undefined) {
         const result = await client.query(
           `INSERT INTO mission.missions
-             (id, tenant_id, owner_user_id, name, objective, icp_id, territory, channels,
+             (id, tenant_id, workspace_id, workspace_binding_state, owner_user_id, name, objective, icp_id, territory, channels,
               budget, autonomy_level, constraints, success_criteria, deadline, status,
               current_plan_version, outcomes, workflow_id, workflow_run_id, version)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
            ON CONFLICT (id) DO NOTHING
            RETURNING id`,
           [
             mission.id,
             ctx.tenantId as string,
+            ctx.workspaceId,
+            mission.workspaceBindingState,
             mission.ownerUserId,
             mission.name,
             mission.objective,
@@ -258,7 +266,7 @@ export class PostgresMissionRepository implements IMissionRepository {
                workflow_run_id = $18,
                version = $19,
                updated_at = NOW()
-           WHERE id = $1 AND version = $20`,
+           WHERE id = $1 AND tenant_id = $2 AND workspace_id = $21 AND version = $20`,
           [
             mission.id,
             ctx.tenantId as string,
@@ -280,6 +288,7 @@ export class PostgresMissionRepository implements IMissionRepository {
             null,
             newVersion,
             expectedVersion,
+            ctx.workspaceId,
           ],
         );
         if (result.rowCount === 0) {

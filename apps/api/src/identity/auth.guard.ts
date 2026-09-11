@@ -16,6 +16,7 @@ import type { TenantId } from '@projectx/shared';
 interface RequestWithUser extends Request {
   user?: RequestUser;
   tenantId?: TenantId;
+  workspaceId?: string;
 }
 
 export const PERMISSIONS_KEY = 'required_permissions';
@@ -91,6 +92,7 @@ export class TenantGuard implements CanActivate {
     }
 
     request.tenantId = tenantId;
+    request.workspaceId = user.workspaceId;
     return true;
   }
 
@@ -118,7 +120,10 @@ export class PermissionsGuard implements CanActivate {
     const user = request.user;
     if (!user) throw new UnauthorizedException();
 
-    const has = required.some((p) => user.permissions.includes(p));
+    const has = required.some((permission) => {
+      const namespace = permission.split(':')[0];
+      return user.permissions.includes(permission) || user.permissions.includes(`${namespace}:all`);
+    });
     if (!has) {
       throw new ForbiddenException('Missing required permission');
     }

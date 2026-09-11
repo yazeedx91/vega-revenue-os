@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
-import { ApprovalApplicationService, InMemoryApprovalRepository, InMemoryNotificationAdapter } from '@projectx/mission-orchestrator';
+import { ApprovalApplicationService, InMemoryApprovalRepository, InMemoryMissionRepository, InMemoryNotificationAdapter, PostgresApprovalRepository, PostgresMissionRepository } from '@projectx/mission-orchestrator';
+import { Pool } from 'pg';
 import type { IWorkflowClient, WorkflowExecutionRef, WorkflowStartOptions, WorkflowStartResult } from '@projectx/infrastructure';
 import type { TenantContext } from '@projectx/domain';
 import { TemporalWorkflowClient } from '@projectx/temporal-client';
 import type { CorrelationId, EventId, TenantId } from '@projectx/shared';
 import { randomUUID } from 'crypto';
 import { ApprovalController } from './approval.controller';
+import { IdentityModule } from '../identity/identity.module';
 
 export const APPROVAL_SERVICE = 'APPROVAL_SERVICE';
 
@@ -44,6 +46,7 @@ class NoOpWorkflowClient implements IWorkflowClient {
  * exercised in unit tests without a live Temporal server.
  */
 @Module({
+  imports: [IdentityModule],
   controllers: [ApprovalController],
   providers: [
     {
@@ -59,10 +62,23 @@ class NoOpWorkflowClient implements IWorkflowClient {
       },
     },
     {
+      provide: 'APPROVAL_REPOSITORY',
+      useFactory: () => process.env.DATABASE_URL
+        ? new PostgresApprovalRepository({ pool: new Pool({ connectionString: process.env.DATABASE_URL, max: 5 }) })
+        : new InMemoryApprovalRepository(),
+    },
+    {
+      provide: 'APPROVAL_MISSION_REPOSITORY',
+      useFactory: () => process.env.DATABASE_URL
+        ? new PostgresMissionRepository({ pool: new Pool({ connectionString: process.env.DATABASE_URL, max: 5 }) })
+        : new InMemoryMissionRepository(),
+    },
+    {
       provide: APPROVAL_SERVICE,
-      useFactory: (workflowClient: IWorkflowClient): ApprovalApplicationService => {
+      useFactory: (workflowClient: IWorkflowClient, approvalRepository, missionRepository): ApprovalApplicationService => {
         return new ApprovalApplicationService({
-          approvalRepository: new InMemoryApprovalRepository(),
+          approvalRepository,
+          missionRepository,
           notificationPort: new InMemoryNotificationAdapter(),
           workflowClient,
           generateApprovalId: () => randomUUID(),
@@ -70,7 +86,7 @@ class NoOpWorkflowClient implements IWorkflowClient {
           generateCorrelationId: () => randomUUID() as CorrelationId,
         });
       },
-      inject: ['WORKFLOW_CLIENT'],
+      inject: ['WORKFLOW_CLIENT', 'APPROVAL_REPOSITORY', 'APPROVAL_MISSION_REPOSITORY'],
     },
   ],
 })

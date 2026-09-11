@@ -57,6 +57,8 @@ export class CreateMissionHandler implements ICommandHandler<CreateMissionComman
       {
         id: missionId,
         tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        workspaceBindingState: 'WORKSPACE_BOUND',
         name: command.name,
         objective: command.objective,
         icpId: command.icpId,

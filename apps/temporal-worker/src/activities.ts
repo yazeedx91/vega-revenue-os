@@ -274,6 +274,7 @@ const idempotencyStore = new InMemoryIdempotencyStore();
 
 const approvalService = new ApprovalApplicationService({
   approvalRepository,
+  missionRepository,
   workflowClient: new NoOpWorkflowClient(),
   notificationPort,
   generateEventId: () => asEventId(generateId()),
