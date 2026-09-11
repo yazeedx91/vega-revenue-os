@@ -7,6 +7,7 @@ import { IdentityModule } from './identity/identity.module';
 import { MissionModule } from './mission/mission.module';
 import { OperatorApiModule } from './operator/operator-api.module';
 import { ApiExceptionFilter } from './shared/api-exception.filter';
+import { CalendarModule } from './calendar/calendar.module';
 import { HealthController } from './health.controller';
 
 /**
@@ -15,7 +16,7 @@ import { HealthController } from './health.controller';
  * will be added as independent NestJS modules in subsequent implementation phases.
  */
 @Module({
-  imports: [GraphInboundModule, ApprovalModule, AdminModule, IdentityModule, MissionModule, OperatorApiModule],
+  imports: [GraphInboundModule, ApprovalModule, AdminModule, IdentityModule, MissionModule, OperatorApiModule, CalendarModule],
   controllers: [HealthController],
   providers: [{ provide: APP_FILTER, useClass: ApiExceptionFilter }],
 })
