@@ -67,6 +67,13 @@ export class GraphInboundIngressService {
         reason: 'Subscription is not registered for this tenant',
       };
     }
+    if (notification.resource !== subscription.resource && !notification.resource.startsWith(`${subscription.resource}/`)) {
+      return {
+        status: 'REJECTED',
+        reasonCode: 'SUBSCRIPTION_RESOURCE_MISMATCH',
+        reason: 'Subscription resource does not cover the notification resource',
+      };
+    }
 
     const clientStateOutcome = await this.config.validator.validateClientState(notification, tenantOutcome.config.webhookSecretReference);
     if (clientStateOutcome.status !== 'VALID') {
@@ -109,7 +116,7 @@ export class GraphInboundIngressService {
       return { status: 'REJECTED', reasonCode: normalizationOutcome.status, reason: normalizationOutcome.reason };
     }
 
-    const correlation = await this.config.correlator.correlate(ctx, normalizationOutcome.event);
+    const correlation = await this.config.correlator.correlate(ctx, subscription, normalizationOutcome.event);
     if (correlation.status === 'NOT_CORRELATED') {
       return { status: 'NOT_CORRELATED', reason: correlation.reason };
     }
@@ -119,11 +126,11 @@ export class GraphInboundIngressService {
 
     const event = toCanonicalReplyIngressEvent(normalizationOutcome.event, {
       tenantId: tenantOutcome.config.tenantId,
-      workspaceId: correlation.execution.workspaceId,
-      leadId: asLeadId(correlation.execution.leadId),
-      campaignId: correlation.execution.campaignId as string,
-      sequenceId: correlation.execution.sequenceId as string,
-      executionId: correlation.execution.id as string,
+      workspaceId: correlation.workspaceId,
+      leadId: asLeadId(correlation.leadId),
+      campaignId: correlation.execution?.campaignId as string | undefined,
+      sequenceId: correlation.execution?.sequenceId as string | undefined,
+      executionId: correlation.execution?.id as string | undefined,
     });
 
     return { status: 'PROCESSED', event, isDuplicate: false };

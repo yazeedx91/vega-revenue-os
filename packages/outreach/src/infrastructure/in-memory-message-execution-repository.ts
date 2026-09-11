@@ -10,7 +10,7 @@ export class InMemoryMessageExecutionRepository implements IMessageExecutionRepo
   async findBySequence(ctx:OutreachRepositoryContext,id:SequenceId){return this.workspace(ctx).filter(e=>e.sequenceId===id);}
   async findByIdempotencyKey(ctx:OutreachRepositoryContext,key:string){return this.workspace(ctx).find(e=>e.idempotencyKey===key)??null;}
   async findByStatus(ctx:OutreachRepositoryContext,status:MessageExecutionStatus[]){return this.workspace(ctx).filter(e=>status.includes(e.status));}
-  async findByProviderMessageId(ctx:TenantContext,id:string){const r=[...this.store.values()].filter(e=>e.tenantId===ctx.tenantId&&e.providerMessageId===id);return r.length===1?r[0]:null;}
+  async findByProviderMessageId(ctx:TenantContext,id:string){const workspaceId=(ctx as OutreachRepositoryContext).workspaceId;const r=[...this.store.values()].filter(e=>e.tenantId===ctx.tenantId&&e.providerMessageId===id&&(workspaceId===undefined||e.workspaceId===workspaceId));return r.length===1?r[0]:null;}
   async findByRecipientFingerprint(ctx:OutreachRepositoryContext,fingerprint:string){return this.workspace(ctx).filter(e=>e.recipientFingerprint===fingerprint);}
   private workspace(ctx:OutreachRepositoryContext){return [...this.store.values()].filter(e=>e.tenantId===ctx.tenantId&&e.workspaceId===ctx.workspaceId);}
 }

@@ -5,6 +5,7 @@ import { asIdempotencyKey, asLeadId, asTenantId } from '@projectx/shared';
 import { GraphMessageNormalizer, toCanonicalReplyIngressEvent } from './graph-message-normalizer';
 import { GraphReplyCorrelator } from './graph-reply-correlator';
 import type { IGraphInboundMessageFetcher } from './graph-inbound-message-fetcher.interface';
+import type { GraphSubscriptionRecord } from '../../ports/graph-subscription-repository.interface';
 import type { TenantEmailConfig } from '../../ports/tenant-email-config-repository.interface';
 
 export interface GraphReconciliationCheckpointStore {
@@ -84,7 +85,19 @@ export class GraphReconciliationPoller {
         continue;
       }
 
-      const correlation = await this.config.correlator.correlate(ctx, normalized.event);
+      const reconciliationSubscription: GraphSubscriptionRecord = {
+        tenantId: tenantConfig.tenantId,
+        subscriptionId: `reconciliation:${mailbox}`,
+        subscriptionScope: 'LEGACY_UNBOUND',
+        workspaceId: null,
+        resource: '/users/' + mailbox + '/messages',
+        notificationUrl: '',
+        clientState: '',
+        expirationDateTime: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const correlation = await this.config.correlator.correlate(ctx, reconciliationSubscription, normalized.event);
       if (correlation.status === 'NOT_CORRELATED') {
         notCorrelated += 1;
         continue;
@@ -97,11 +110,11 @@ export class GraphReconciliationPoller {
       processed.push(
         toCanonicalReplyIngressEvent(normalized.event, {
           tenantId: tenantConfig.tenantId,
-          workspaceId: correlation.execution.workspaceId,
-          leadId: asLeadId(correlation.execution.leadId),
-          campaignId: correlation.execution.campaignId as string,
-          sequenceId: correlation.execution.sequenceId as string,
-          executionId: correlation.execution.id as string,
+          workspaceId: correlation.workspaceId,
+          leadId: asLeadId(correlation.leadId),
+          campaignId: correlation.execution?.campaignId as string | undefined,
+          sequenceId: correlation.execution?.sequenceId as string | undefined,
+          executionId: correlation.execution?.id as string | undefined,
         }),
       );
 
