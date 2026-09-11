@@ -73,8 +73,6 @@ export class ConversationHandlingService {
       content: this.deps.piiScrubber.scrub(event.content),
       receivedAt: event.receivedAt,
       messageIdHeader: event.messageIdHeader,
-      sender: event.sender,
-      recipientAddress: event.recipientAddress,
       subject: event.subject ? this.deps.piiScrubber.scrub(event.subject) : event.subject,
       // htmlBody is expected to already be XSS-sanitized by the inbound
       // ingress pipeline before this point; it is intentionally not
