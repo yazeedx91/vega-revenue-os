@@ -27,6 +27,8 @@ function makeMission(tenantId = asTenantId('tenant-1')) {
     {
       id: asMissionId('mission-1'),
       tenantId,
+      workspaceId: 'workspace-1',
+      workspaceBindingState: 'WORKSPACE_BOUND',
       name: 'Q3 Expansion',
       objective: 'Generate qualified opportunities in manufacturing',
       icpId: 'icp-1',
@@ -73,6 +75,17 @@ function makeTaskProps(
 }
 
 describe('Mission aggregate lifecycle', () => {
+  it('rejects new Mission creation without authoritative workspace ownership', () => {
+    const mission = makeMission();
+    const result = Mission.create({
+      id: asMissionId('mission-unbound'), tenantId: mission.tenantId, name: mission.name,
+      objective: mission.objective, icpId: mission.icpId, territory: [], channels: [],
+      budget: mission.budget, autonomyLevel: mission.autonomyLevel, constraints: {}, successCriteria: {},
+      ownerUserId: mission.ownerUserId, plan: defaultPlan(),
+    }, asCorrelationId('corr-unbound'), asEventId('event-unbound'));
+    expect(result.success).toBe(false);
+  });
+
   it('creates a mission in DRAFT and emits MissionCreated', () => {
     const mission = makeMission();
     expect(mission.status).toBe('DRAFT');
@@ -84,6 +97,8 @@ describe('Mission aggregate lifecycle', () => {
       {
         id: asMissionId('mission-1'),
         tenantId: asTenantId('tenant-1'),
+        workspaceId: 'workspace-1',
+        workspaceBindingState: 'WORKSPACE_BOUND',
         name: 'X',
         objective: '   ',
         icpId: 'icp-1',

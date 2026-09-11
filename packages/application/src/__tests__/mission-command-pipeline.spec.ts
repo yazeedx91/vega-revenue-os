@@ -54,6 +54,7 @@ describe('Mission command pipeline', () => {
   const actor = Actor.human(asUserId('user-1'), tenantId);
   const ctx: CommandContext = {
     tenantId,
+    workspaceId: 'workspace-1',
     actor,
     correlationId: asCorrelationId('corr-1'),
     idempotencyKey: asIdempotencyKey('idem-create'),
@@ -95,6 +96,7 @@ describe('Mission command pipeline', () => {
     const otherTenant = asTenantId('tenant-2');
     const otherCtx: CommandContext = {
       tenantId: otherTenant,
+      workspaceId: 'workspace-2',
       actor: Actor.human(asUserId('user-2'), otherTenant),
       correlationId: asCorrelationId('corr-2'),
     };

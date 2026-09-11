@@ -19,6 +19,7 @@ import { asCorrelationId, asEventId, asIdempotencyKey, asMissionId, asTenantId, 
 export function createTenantContext(tenantId: string, correlationId: string): TenantContext {
   return {
     tenantId: asTenantId(tenantId),
+    workspaceId: 'workspace-1',
     correlationId: asCorrelationId(correlationId) as string,
   };
 }
@@ -30,6 +31,8 @@ export function createTestMission(props?: { missionId?: string; tenantId?: strin
     {
       id: missionId,
       tenantId,
+      workspaceId: 'workspace-1',
+      workspaceBindingState: 'WORKSPACE_BOUND',
       name: 'Test Mission',
       objective: 'Generate pipeline',
       icpId: 'icp-1',

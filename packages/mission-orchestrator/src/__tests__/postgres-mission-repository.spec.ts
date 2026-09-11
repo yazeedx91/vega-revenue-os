@@ -90,14 +90,22 @@ describe('PostgresMissionRepository', () => {
   }
 
   function makeCtx(tenantId: TenantId) {
-    return { tenantId, correlationId: asCorrelationId('corr-repo-test') };
+    return { tenantId, workspaceId: randomUUID(), correlationId: asCorrelationId('corr-repo-test') };
   }
 
-  function makeMission(tenantId: TenantId, missionId: string) {
+  async function seedWorkspace(ctx: ReturnType<typeof makeCtx>) {
+    const userId = randomUUID();
+    await adminPool!.query('INSERT INTO identity.users(id,email,tenant_id) VALUES($1,$2,$3)', [userId, `${userId}@example.test`, ctx.tenantId]);
+    await adminPool!.query('INSERT INTO identity.workspaces(id,tenant_id,name,owner_user_id) VALUES($1,$2,$3,$4)', [ctx.workspaceId, ctx.tenantId, 'Test', userId]);
+  }
+
+  function makeMission(tenantId: TenantId, missionId: string, workspaceId: string) {
     const result = Mission.create(
       {
         id: asMissionId(missionId),
         tenantId,
+        workspaceId,
+        workspaceBindingState: 'WORKSPACE_BOUND',
         name: 'Research Mission',
         objective: 'find qualified prospects',
         icpId: 'icp-1',
@@ -129,8 +137,9 @@ describe('PostgresMissionRepository', () => {
     if (!repo) return;
     const tenantId = makeTenantId();
     const ctx = makeCtx(tenantId);
+    await seedWorkspace(ctx);
     const id = randomUUID();
-    const mission = makeMission(tenantId, id);
+    const mission = makeMission(tenantId, id, ctx.workspaceId);
     const actor = Actor.human(asUserId(randomUUID()), tenantId);
     mission.approve(actor, asCorrelationId('c2'), asEventId('e2'));
     mission.start(asCorrelationId('c3'), asEventId('e3'));
@@ -152,6 +161,7 @@ describe('PostgresMissionRepository', () => {
     if (!repo) return;
     const tenantId = makeTenantId();
     const ctx = makeCtx(tenantId);
+    await seedWorkspace(ctx);
     const result = await repo.findById(ctx, randomUUID());
     expect(result).toBeNull();
   });
@@ -160,8 +170,9 @@ describe('PostgresMissionRepository', () => {
     if (!repo) return;
     const tenantId = makeTenantId();
     const ctx = makeCtx(tenantId);
+    await seedWorkspace(ctx);
     const id = randomUUID();
-    const mission = makeMission(tenantId, id);
+    const mission = makeMission(tenantId, id, ctx.workspaceId);
     await repo.save(ctx, mission);
 
     const actor = Actor.human(asUserId(randomUUID()), tenantId);

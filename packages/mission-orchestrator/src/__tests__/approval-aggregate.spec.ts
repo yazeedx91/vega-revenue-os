@@ -10,6 +10,8 @@ describe('Approval aggregate', () => {
       {
         id: 'approval-1' as string,
         tenantId,
+        workspaceId: 'workspace-1',
+        workspaceBindingState: 'WORKSPACE_BOUND',
         missionId: 'mission-1',
         taskId: 'task-1',
         executionId: 'exec-1',
@@ -33,6 +35,17 @@ describe('Approval aggregate', () => {
     }
     return result.value;
   }
+
+  it('rejects new Approval creation without parent Mission workspace ownership', () => {
+    const approval = createApproval();
+    const result = Approval.create({
+      id: 'approval-unbound' as never, tenantId, missionId: approval.missionId,
+      actionType: approval.actionType, riskCategory: approval.riskCategory, proposedAction: {}, evidence: [],
+      reasoning: 'test', confidence: 1, requestedBy: 'agent', approverRole: 'owner', timeoutSeconds: 60,
+      idempotencyKey: asIdempotencyKey('unbound'), correlationId,
+    }, asEventId('evt-unbound'));
+    expect(result.success).toBe(false);
+  });
 
   it('starts in PENDING', () => {
     const approval = createApproval();

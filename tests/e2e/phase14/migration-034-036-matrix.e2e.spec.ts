@@ -81,14 +81,14 @@ async function runCase(body: (client: Client) => Promise<void>): Promise<void> {
   }
 }
 
-describe('isolated migration acceptance matrix 034-036', () => {
+describe('isolated migration acceptance matrix 034-037', () => {
   jest.setTimeout(180_000);
 
-  it('A fresh 001-036 passes exactly once', async () => runCase(async (client) => {
-    await migrate(client, '036_graph_subscriptions_workspace_scope.sql');
+  it('A fresh 001-037 passes exactly once', async () => runCase(async (client) => {
+    await migrate(client, '037_mission_approval_workspace_ownership.sql');
     const count = await client.query('SELECT count(*)::int AS count FROM schema_migrations');
     expect(count.rows[0].count).toBe(files.length);
-    await migrate(client, '036_graph_subscriptions_workspace_scope.sql').catch(() => undefined);
+    await migrate(client, '037_mission_approval_workspace_ownership.sql').catch(() => undefined);
     const distinct = await client.query('SELECT count(*)::int AS count, count(DISTINCT filename)::int AS distinct_count FROM schema_migrations');
     expect(distinct.rows[0]).toEqual({ count: files.length, distinct_count: files.length });
   }));

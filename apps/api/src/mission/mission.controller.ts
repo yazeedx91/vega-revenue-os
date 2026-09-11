@@ -6,6 +6,7 @@ import {
   HttpException,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -19,12 +20,13 @@ import {
   asUserId,
   type MissionContract,
 } from '@projectx/shared';
-import { JwtAuthGuard, TenantGuard, CurrentUser, type RequestUser } from '../identity/auth.guard';
+import { JwtAuthGuard, TenantGuard, PermissionsGuard, CurrentUser, RequirePermissions, type RequestUser } from '../identity/auth.guard';
 import type { CreateMissionDto } from './mission.dto';
 
 function buildContext(user: RequestUser): TenantContext {
   return {
     tenantId: user.tenantId,
+    workspaceId: user.workspaceId,
     correlationId: asCorrelationId(randomUUID()),
   };
 }
@@ -32,6 +34,7 @@ function buildContext(user: RequestUser): TenantContext {
 function buildCommandContext(user: RequestUser) {
   return {
     tenantId: user.tenantId,
+    workspaceId: user.workspaceId,
     actor: Actor.human(asUserId(user.userId), user.tenantId),
     correlationId: asCorrelationId(randomUUID()),
   };
@@ -47,7 +50,7 @@ const INITIAL_PLAN: MissionPlan = {
 };
 
 @Controller('missions')
-@UseGuards(JwtAuthGuard, TenantGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 export class MissionController {
   constructor(
     private readonly missionRepository: IMissionRepository,
@@ -55,6 +58,7 @@ export class MissionController {
     private readonly orchestrator: MissionOrchestratorService,
   ) {}
 
+  @RequirePermissions('mission:execute')
   @Post()
   async create(
     @CurrentUser() user: RequestUser,
@@ -83,10 +87,11 @@ export class MissionController {
     return mapMissionToContract(result.value.value);
   }
 
+  @RequirePermissions('mission:read')
   @Get(':id')
   async getById(
     @CurrentUser() user: RequestUser,
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ): Promise<MissionContract> {
     const mission = await this.missionRepository.findById(buildContext(user), id);
     if (!mission) {
@@ -95,37 +100,53 @@ export class MissionController {
     return mapMissionToContract(mission);
   }
 
+  @RequirePermissions('mission:execute')
   @Post(':id/start')
-  async start(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  async start(@CurrentUser() user: RequestUser, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     const ctx = buildContext(user);
+    await this.requireMission(ctx, id);
     return this.orchestrator.startMission(ctx, { missionId: asMissionId(id) });
   }
 
+  @RequirePermissions('mission:pause')
   @Post(':id/pause')
-  async pause(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  async pause(@CurrentUser() user: RequestUser, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     const ctx = buildContext(user);
+    await this.requireMission(ctx, id);
     await this.orchestrator.pauseMission(ctx, { missionId: asMissionId(id), reason: 'User requested' });
     return { missionId: id, status: 'PAUSED' };
   }
 
+  @RequirePermissions('mission:resume')
   @Post(':id/resume')
-  async resume(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  async resume(@CurrentUser() user: RequestUser, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     const ctx = buildContext(user);
+    await this.requireMission(ctx, id);
     await this.orchestrator.resumeMission(ctx, { missionId: asMissionId(id) });
     return { missionId: id, status: 'EXECUTING' };
   }
 
+  @RequirePermissions('mission:cancel')
   @Post(':id/cancel')
-  async cancel(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  async cancel(@CurrentUser() user: RequestUser, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     const ctx = buildContext(user);
+    await this.requireMission(ctx, id);
     await this.orchestrator.cancelMission(ctx, { missionId: asMissionId(id), reason: 'User requested' });
     return { missionId: id, status: 'CANCELLED' };
   }
 
+  @RequirePermissions('mission:execute')
   @Post(':id/replan')
-  async replan(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  async replan(@CurrentUser() user: RequestUser, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     const ctx = buildContext(user);
+    await this.requireMission(ctx, id);
     await this.orchestrator.replanMission(ctx, { missionId: asMissionId(id) });
     return { missionId: id, status: 'REPLANNING' };
+  }
+
+  private async requireMission(ctx: TenantContext, id: string): Promise<void> {
+    if (!(await this.missionRepository.findById(ctx, id))) {
+      throw new HttpException('Mission not found', HttpStatus.NOT_FOUND);
+    }
   }
 }

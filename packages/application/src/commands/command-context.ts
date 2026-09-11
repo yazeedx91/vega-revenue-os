@@ -3,6 +3,7 @@ import type { CausationId, CorrelationId, IdempotencyKey, TenantId } from '@proj
 
 export interface CommandContext {
   readonly tenantId: TenantId;
+  readonly workspaceId?: string;
   readonly actor: Actor;
   readonly correlationId: CorrelationId;
   readonly causationId?: CausationId;

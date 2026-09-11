@@ -7,7 +7,8 @@ export class InMemoryMissionRepository implements IMissionRepository {
   private readonly store = new Map<string, Mission>();
 
   async findById(ctx: TenantContext, id: MissionId): Promise<Mission | null> {
-    const aggregate = this.store.get(this.key(ctx.tenantId, id));
+    if (!ctx.workspaceId) return null;
+    const aggregate = this.store.get(this.key(ctx.tenantId, ctx.workspaceId, id));
     if (aggregate && aggregate.tenantId !== ctx.tenantId) {
       throw new TenantIsolationError('Cross-tenant access detected');
     }
@@ -18,10 +19,13 @@ export class InMemoryMissionRepository implements IMissionRepository {
     if (aggregate.tenantId !== ctx.tenantId) {
       throw new TenantIsolationError('Cross-tenant save detected');
     }
-    this.store.set(this.key(ctx.tenantId, aggregate.id), aggregate);
+    if (!ctx.workspaceId || aggregate.workspaceId !== ctx.workspaceId || aggregate.workspaceBindingState !== 'WORKSPACE_BOUND') {
+      throw new TenantIsolationError('Cross-workspace save detected');
+    }
+    this.store.set(this.key(ctx.tenantId, ctx.workspaceId, aggregate.id), aggregate);
   }
 
-  private key(tenantId: TenantId, id: MissionId): string {
-    return `${tenantId}:${id}`;
+  private key(tenantId: TenantId, workspaceId: string, id: MissionId): string {
+    return `${tenantId}:${workspaceId}:${id}`;
   }
 }

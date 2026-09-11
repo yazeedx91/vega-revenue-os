@@ -41,6 +41,7 @@ import {
 import {
   ApprovalApplicationService,
   PostgresApprovalRepository,
+  PostgresMissionRepository,
   type IApprovalRepository,
   type INotificationPort,
 } from '@projectx/mission-orchestrator';
@@ -687,6 +688,7 @@ export function createPhase14RealSendOperatorFromEnv(
 
   const approvalApplicationService = new ApprovalApplicationService({
     approvalRepository,
+    missionRepository: new PostgresMissionRepository({ pool }),
     workflowClient,
     notificationPort: new NoOpNotificationPort(),
     generateEventId: () => asEventId(`evt-${Date.now()}-${randomUUID().slice(0, 8)}`),

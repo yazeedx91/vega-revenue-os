@@ -37,9 +37,13 @@ export interface MissionPlan {
   readonly fallbackBranches: unknown[];
 }
 
+export type WorkspaceBindingState = 'WORKSPACE_BOUND' | 'LEGACY_UNBOUND';
+
 export interface MissionProps {
   readonly id: MissionId;
   readonly tenantId: string & { readonly __brand: 'TenantId' };
+  readonly workspaceId?: string;
+  readonly workspaceBindingState?: WorkspaceBindingState;
   readonly name: string;
   readonly objective: string;
   readonly icpId: string;
@@ -61,6 +65,8 @@ export interface MissionProps {
 }
 
 export class Mission extends AggregateRoot<MissionId> {
+  public readonly workspaceId?: string;
+  public readonly workspaceBindingState: WorkspaceBindingState;
   public readonly name: string;
   public readonly objective: string;
   public readonly icpId: string;
@@ -98,6 +104,8 @@ export class Mission extends AggregateRoot<MissionId> {
 
   private constructor(props: MissionProps) {
     super(props.tenantId, props.id);
+    this.workspaceId = props.workspaceId;
+    this.workspaceBindingState = props.workspaceBindingState ?? 'LEGACY_UNBOUND';
     this.name = props.name;
     this.objective = props.objective;
     this.icpId = props.icpId;
@@ -123,6 +131,9 @@ export class Mission extends AggregateRoot<MissionId> {
     correlationId: CorrelationId,
     eventId: EventId,
   ): Result<Mission, MissionInvariantError> {
+    if (props.workspaceBindingState !== 'WORKSPACE_BOUND' || !props.workspaceId) {
+      return fail(new MissionInvariantError('New Mission requires an authoritative workspace'));
+    }
     if (!props.objective || props.objective.trim().length === 0) {
       return fail(new MissionInvariantError('Mission objective is required'));
     }

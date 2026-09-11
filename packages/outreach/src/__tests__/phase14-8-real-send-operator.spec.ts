@@ -196,6 +196,7 @@ function buildDependencies(liveEmailEnabled: boolean): {
 
   const approvalApplicationService = new ApprovalApplicationService({
     approvalRepository,
+    missionRepository: { findById: async (ctx, id) => ({ id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId, workspaceBindingState: 'WORKSPACE_BOUND' }), save: async () => undefined } as never,
     workflowClient,
     notificationPort: {
       notifyApprovalRequested: async () => {
@@ -408,7 +409,7 @@ describe('Phase14RealSendOperator', () => {
     expect(deps.workflowClient.signals[0].signalName).toBe('outreachApprovalGranted');
 
     const approvals = await deps.approvalRepository.load(
-      ctx.tenantId,
+      ctx,
       deps.workflowClient.signals[0].payload.approvalId as string,
     );
     expect(approvals?.status).toBe('APPROVED');
