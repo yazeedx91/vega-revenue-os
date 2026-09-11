@@ -1,15 +1,11 @@
-import { createHmac, createCipheriv, randomBytes } from 'node:crypto';
+import { createHmac, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { ISecretsProvider } from '@projectx/infrastructure';
 import type { IContactChannelProtector, ProtectedContactChannel } from './contact-channel-protector.interface';
+import { RecipientEncryptionKeyResolver, RecipientHmacKeyResolver } from './protected-channel-keyring';
 
 // ---------------------------------------------------------------------------
 // Secret names (HMAC and encryption independently versioned)
 // ---------------------------------------------------------------------------
-const HMAC_KEY_SECRET = 'projectx/contact-channel/hmac-key';
-const HMAC_KEY_VERSION_SECRET = 'projectx/contact-channel/hmac-key-version';
-const ENCRYPTION_KEY_SECRET = 'projectx/contact-channel/encryption-key';
-const ENCRYPTION_KEY_VERSION_SECRET = 'projectx/contact-channel/encryption-key-version';
-
 // ---------------------------------------------------------------------------
 // Crypto constants
 // ---------------------------------------------------------------------------
@@ -44,7 +40,12 @@ function fromBase64Url(str: string): Buffer {
 // Implementation
 // ---------------------------------------------------------------------------
 export class ContactChannelProtector implements IContactChannelProtector {
-  constructor(private readonly secrets: ISecretsProvider) {}
+  private readonly encryptionKeys: RecipientEncryptionKeyResolver;
+  private readonly hmacKeys: RecipientHmacKeyResolver;
+  constructor(secrets: ISecretsProvider) {
+    this.encryptionKeys = new RecipientEncryptionKeyResolver(secrets);
+    this.hmacKeys = new RecipientHmacKeyResolver(secrets);
+  }
 
   async protectEmail(tenantId: string, rawEmail: string): Promise<ProtectedContactChannel> {
     const canonical = canonicalizeEmail(rawEmail);
@@ -82,33 +83,18 @@ export class ContactChannelProtector implements IContactChannelProtector {
     encKeyHex: string;
     encKeyVersion: string;
   }> {
-    let hmacKeyHex: string;
-    let hmacKeyVersion: string;
-    let encKeyHex: string;
-    let encKeyVersion: string;
-
     try {
-      hmacKeyHex = await this.secrets.getSecret(HMAC_KEY_SECRET);
+      const hmac = await this.hmacKeys.resolveCurrent();
+      const encryption = await this.encryptionKeys.resolveCurrent();
+      return {
+        hmacKeyHex: Buffer.from(hmac.key).toString('hex'),
+        hmacKeyVersion: hmac.keyVersion,
+        encKeyHex: Buffer.from(encryption.key).toString('hex'),
+        encKeyVersion: encryption.keyVersion,
+      };
     } catch {
-      throw new ContactChannelProtectionError('HMAC secret unavailable');
+      throw new ContactChannelProtectionError('Protected-channel key material unavailable');
     }
-    try {
-      hmacKeyVersion = await this.secrets.getSecret(HMAC_KEY_VERSION_SECRET);
-    } catch {
-      throw new ContactChannelProtectionError('HMAC key version secret unavailable');
-    }
-    try {
-      encKeyHex = await this.secrets.getSecret(ENCRYPTION_KEY_SECRET);
-    } catch {
-      throw new ContactChannelProtectionError('Encryption secret unavailable');
-    }
-    try {
-      encKeyVersion = await this.secrets.getSecret(ENCRYPTION_KEY_VERSION_SECRET);
-    } catch {
-      throw new ContactChannelProtectionError('Encryption key version secret unavailable');
-    }
-
-    return { hmacKeyHex, hmacKeyVersion, encKeyHex, encKeyVersion };
   }
 }
 
@@ -116,7 +102,7 @@ export class ContactChannelProtector implements IContactChannelProtector {
 // Canonicalization
 // ---------------------------------------------------------------------------
 
-function canonicalizeEmail(raw: string): string {
+export function canonicalizeEmail(raw: string): string {
   const trimmed = raw.trim().toLowerCase();
   if (!trimmed) {
     throw new ContactChannelProtectionError('Email is empty');
@@ -156,7 +142,7 @@ function canonicalizePhone(raw: string): string {
 // Key parsing
 // ---------------------------------------------------------------------------
 
-function parseHexKey(hex: string, expectedBytes: number, label: string): Buffer {
+export function parseHexKey(hex: string, expectedBytes: number, label: string): Buffer {
   if (!/^[0-9a-fA-F]+$/.test(hex)) {
     throw new ContactChannelProtectionError(`${label} key is not valid hex`);
   }
@@ -191,7 +177,7 @@ function buildHmacInput(
 // Structured AEAD AAD
 // ---------------------------------------------------------------------------
 
-function buildAad(
+export function buildAad(
   tenantId: string,
   channelType: string,
   encKeyVersion: string,
@@ -211,7 +197,7 @@ function buildAad(
 // Fingerprint envelope: h1.<hmacKeyVersion>.<base64urlHmac>
 // ---------------------------------------------------------------------------
 
-function buildFingerprintEnvelope(
+export function buildFingerprintEnvelope(
   key: Buffer,
   hmacKeyVersion: string,
   tenantId: string,
@@ -321,4 +307,21 @@ export function parseCiphertextEnvelope(envelope: string): ParsedCiphertextEnvel
   const authTag = payload.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
   const encrypted = payload.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
   return { format, keyVersion, iv, authTag, encrypted };
+}
+
+export function decryptCiphertextEnvelope(
+  key: Buffer,
+  tenantId: string,
+  channelType: string,
+  envelope: string,
+): string {
+  const parsed = parseCiphertextEnvelope(envelope);
+  const decipher = createDecipheriv(ALGORITHM, key, parsed.iv, { authTagLength: AUTH_TAG_LENGTH });
+  decipher.setAAD(buildAad(tenantId, channelType, parsed.keyVersion));
+  decipher.setAuthTag(parsed.authTag);
+  try {
+    return Buffer.concat([decipher.update(parsed.encrypted), decipher.final()]).toString('utf8');
+  } catch {
+    throw new ContactChannelProtectionError('Protected channel recovery failed');
+  }
 }

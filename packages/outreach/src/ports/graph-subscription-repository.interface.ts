@@ -1,7 +1,11 @@
 import type { TenantContext } from '@projectx/domain';
 
+export type GraphSubscriptionScope = 'WORKSPACE_BOUND' | 'LEGACY_UNBOUND';
+
 export interface GraphSubscriptionRecord {
   readonly tenantId: string;
+  readonly workspaceId: string | null;
+  readonly subscriptionScope: GraphSubscriptionScope;
   readonly subscriptionId: string;
   readonly resource: string;
   readonly notificationUrl: string;
@@ -13,6 +17,8 @@ export interface GraphSubscriptionRecord {
 
 export interface CreateGraphSubscriptionRecord {
   readonly tenantId: string;
+  readonly workspaceId: string;
+  readonly subscriptionScope: 'WORKSPACE_BOUND';
   readonly subscriptionId: string;
   readonly resource: string;
   readonly notificationUrl: string;

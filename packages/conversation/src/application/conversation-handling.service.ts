@@ -2,7 +2,7 @@ import type { Conversation, TenantContext } from '@projectx/domain';
 import { Conversation as ConversationAggregate, ReplyMessage } from '@projectx/domain';
 import type { CorrelationId, EventId, LeadId, ReplyMessageId } from '@projectx/shared';
 import { asConversationId, asReplyMessageId } from '@projectx/shared';
-import type { IConversationRepository } from '../ports/conversation-repository.interface';
+import type { ConversationRepositoryContext, IConversationRepository } from '../ports/conversation-repository.interface';
 import type { IIntentClassifier } from '../ports/intent-classifier.interface';
 import type { ILeadRepository } from '../ports/lead-repository.interface';
 import type { INextBestActionPolicy } from '../ports/next-best-action-policy.interface';
@@ -38,11 +38,11 @@ export interface ClassifyAndActResult {
 export class ConversationHandlingService {
   constructor(private readonly deps: ConversationHandlingServiceDeps) {}
 
-  async load(ctx: TenantContext, id: string): Promise<Conversation | null> {
+  async load(ctx: ConversationRepositoryContext, id: string): Promise<Conversation | null> {
     return this.deps.conversationRepository.load(ctx, id as unknown as import('@projectx/shared').ConversationId);
   }
 
-  async handleReply(ctx: TenantContext, event: ReplyIngressEvent): Promise<HandleReplyResult> {
+  async handleReply(ctx: ConversationRepositoryContext, event: ReplyIngressEvent): Promise<HandleReplyResult> {
     let conversation = await this.deps.conversationRepository.findByLeadAndChannel(
       ctx,
       event.leadId as string,
@@ -54,6 +54,7 @@ export class ConversationHandlingService {
         {
           id: asConversationId(this.deps.generateConversationId()),
           tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
           leadId: event.leadId as LeadId,
           channel: event.channel,
           campaignId: event.campaignId,
@@ -72,8 +73,6 @@ export class ConversationHandlingService {
       content: this.deps.piiScrubber.scrub(event.content),
       receivedAt: event.receivedAt,
       messageIdHeader: event.messageIdHeader,
-      sender: event.sender,
-      recipientAddress: event.recipientAddress,
       subject: event.subject ? this.deps.piiScrubber.scrub(event.subject) : event.subject,
       // htmlBody is expected to already be XSS-sanitized by the inbound
       // ingress pipeline before this point; it is intentionally not
@@ -94,7 +93,7 @@ export class ConversationHandlingService {
   }
 
   async classifyAndAct(
-    ctx: TenantContext,
+    ctx: ConversationRepositoryContext,
     conversation: Conversation,
     autonomyLevel: number,
   ): Promise<ClassifyAndActResult> {
@@ -160,7 +159,7 @@ export class ConversationHandlingService {
   }
 
   private async updateLeadStatus(
-    ctx: TenantContext,
+    ctx: ConversationRepositoryContext,
     leadId: string,
     outcome: 'QUALIFIED' | 'NOT_QUALIFIED',
     reason: string,

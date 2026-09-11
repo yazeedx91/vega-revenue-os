@@ -1,5 +1,5 @@
 import type { CampaignId, EvidenceId, LeadId, SequenceId } from '@projectx/shared';
-import type { Recipient } from './recipient';
+import type { ProtectedRecipientSnapshot } from './protected-recipient';
 import type { SequenceStep } from './sequence-step';
 import type { OutreachChannel } from './provider-contracts';
 
@@ -7,7 +7,7 @@ export interface OutreachPlan {
   readonly campaignId: CampaignId;
   readonly sequenceId: SequenceId;
   readonly leadId: LeadId;
-  readonly recipient: Recipient;
+  readonly recipient: ProtectedRecipientSnapshot;
   readonly channel: OutreachChannel;
   readonly steps: SequenceStep[];
   readonly firstDueAt: Date;

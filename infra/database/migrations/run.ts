@@ -2,6 +2,25 @@ import { readFileSync, readdirSync } from 'fs';
 import { resolve } from 'path';
 import { Client } from 'pg';
 
+export interface MigrationClient {
+  query(sql: string, params?: unknown[]): Promise<{ rowCount: number | null }>;
+}
+
+export async function applyMigration(client: MigrationClient, filename: string, sql: string): Promise<void> {
+  await client.query('BEGIN');
+  try {
+    await client.query(sql);
+    await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [filename]);
+    await client.query('COMMIT');
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+    }
+    throw error;
+  }
+}
+
 export async function main(): Promise<void> {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
@@ -31,8 +50,7 @@ export async function main(): Promise<void> {
       }
 
       const sql = readFileSync(resolve(__dirname, file), 'utf-8');
-      await client.query(sql);
-      await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
+      await applyMigration(client, file, sql);
       console.log(`Applied ${file}`);
     }
   } finally {

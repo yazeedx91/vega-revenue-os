@@ -1,5 +1,10 @@
 import type { IOutputValidator, IReasoningEngine, OutputValidationResult, ReasoningOutput } from '@projectx/ai-runtime';
 import { ResearchEvidence, type Lead, type OutreachChannel, type OutreachPlan, type ProviderHealth, type ProviderSendRequest, type ProviderSendResult, type TenantContext } from '@projectx/domain';
+import type { IOutboundRecipientSource } from '../ports/outbound-recipient-source.interface';
+import type {
+  IHistoricalRecipientFingerprint,
+  IOutboundRecipientRecovery,
+} from '../ports/outbound-recipient-recovery.interface';
 import { InMemoryAuditLog, InMemoryIdempotencyStore, InMemoryRateLimiter } from '@projectx/infrastructure';
 import {
   asAccountId,
@@ -12,6 +17,8 @@ import {
   asLeadId,
   asOutreachMessageId,
   asSequenceId,
+  asResearchRequestId,
+  asResearchRunId,
   asTenantId,
 } from '@projectx/shared';
 import { OutreachExecutionService } from '../application/outreach-execution.service';
@@ -29,7 +36,7 @@ import { SendSafetyGate } from '../safety/send-safety-gate';
 
 describe('OutreachExecutionService production idempotency hardening', () => {
   const tenantA = asTenantId('tenant-a');
-  const ctx: TenantContext = { tenantId: tenantA, correlationId: asCorrelationId('corr-1') };
+  const ctx: TenantContext = { tenantId: tenantA, workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
 
   const fakeReasoningEngine: IReasoningEngine = {
     async reason(): Promise<ReasoningOutput> {
@@ -71,6 +78,33 @@ describe('OutreachExecutionService production idempotency hardening', () => {
     }
   }
 
+  class TestRecipientSource implements IOutboundRecipientSource {
+    async resolveProtectedEmailRecipient(input: {
+      tenantId: string;
+      workspaceId: string;
+      leadId: string;
+      contactId: string;
+    }) {
+      return {
+        contactId: input.contactId,
+        recipientFingerprint: 'h1.1.fingerprint123',
+        recipientCiphertext: 'e1.1.ciphertext456',
+      };
+    }
+  }
+
+  class TestRecipientRecovery implements IOutboundRecipientRecovery {
+    async recoverEmailForSend(): Promise<string> {
+      return 'test@example.com';
+    }
+  }
+
+  class TestHistoricalRecipientFingerprint implements IHistoricalRecipientFingerprint {
+    async fingerprintEmailForVersion(): Promise<string> {
+      return 'h1.1.fingerprint123';
+    }
+  }
+
   async function buildHarness(providerResult?: ProviderSendResult) {
     const campaignRepo = new InMemoryCampaignRepository();
     const sequenceRepo = new InMemorySequenceRepository();
@@ -82,7 +116,10 @@ describe('OutreachExecutionService production idempotency hardening', () => {
 
     const schedulePolicy = new InMemorySequenceSchedulePolicy();
     let seed = 0;
-    const planningService = new OutreachPlanningService({ generateSequenceId: () => asSequenceId(`seq-${++seed}`) });
+    const planningService = new OutreachPlanningService({
+      generateSequenceId: () => asSequenceId(`seq-${++seed}`),
+      recipientSource: new TestRecipientSource(),
+    });
     const personalizationService = new OutreachPersonalizationService({
       reasoningEngine: fakeReasoningEngine,
       outputValidator: fakeValidator,
@@ -115,6 +152,8 @@ describe('OutreachExecutionService production idempotency hardening', () => {
       schedulePolicy,
       personalizationService,
       safetyGate,
+      recipientRecovery: new TestRecipientRecovery(),
+      historicalRecipientFingerprint: new TestHistoricalRecipientFingerprint(),
       idempotencyStore,
       generateExecutionId: () => `exec-${++seed}`,
       generateEventId: () => `evt-${++seed}` as any,
@@ -132,9 +171,11 @@ describe('OutreachExecutionService production idempotency hardening', () => {
     const lead: Lead = {
       id: asLeadId('lead-1'),
       tenantId: tenantA,
+      workspaceId: 'workspace-1',
       accountId: asAccountId('acc-1'),
       contactId: asContactId('contact-1'),
       icpProfileId: asICPProfileId('icp-1'),
+      icpProfileVersionId: asICPProfileId('icp-version-1'),
       scores: { icpMatch: 0.9, signalScore: 0.8, intentScore: 0.7, evidenceConfidence: 0.9, overall: 0.85 },
       status: 'QUALIFIED',
       evidenceReferences: [],
@@ -142,15 +183,21 @@ describe('OutreachExecutionService production idempotency hardening', () => {
       updatedAt: new Date(),
     } as unknown as Lead;
 
-    const planningService = new OutreachPlanningService({ generateSequenceId: () => asSequenceId(`seq-${Date.now()}`) });
-    const plan: OutreachPlan = planningService.plan(ctx, { campaignId: asCampaignId(`camp-${Date.now()}`), lead, evidence: [] });
+    const planningService = new OutreachPlanningService({
+      generateSequenceId: () => asSequenceId(`seq-${Date.now()}`),
+      recipientSource: new TestRecipientSource(),
+    });
+    const plan: OutreachPlan = await planningService.plan(ctx, { campaignId: asCampaignId(`camp-${Date.now()}`), lead, evidence: [] });
 
     const campaign = OutreachCampaign.create(
       {
         id: plan.campaignId,
         tenantId: tenantA,
+        workspaceId: 'workspace-1',
         leadId: lead.contactId as string,
-        recipient: plan.recipient,
+        contactId: lead.contactId as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         channel: plan.channel,
         steps: plan.steps,
         missionId: 'm-1',
@@ -167,9 +214,13 @@ describe('OutreachExecutionService production idempotency hardening', () => {
       {
         id: plan.sequenceId,
         tenantId: tenantA,
+        workspaceId: 'workspace-1',
         campaignId: campaign.id,
         leadId: lead.contactId as string,
-        recipient: plan.recipient,
+        contactId: lead.contactId as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientCiphertext: plan.recipient.recipientCiphertext,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         steps: plan.steps,
       },
       ctx.correlationId,
@@ -184,22 +235,26 @@ describe('OutreachExecutionService production idempotency hardening', () => {
       new ResearchEvidence({
         evidenceId: asEvidenceId('ev-1'),
         tenantId: tenantA,
+        workspaceId: '00000000-0000-4000-8000-000000000001',
+        requestId: asResearchRequestId('request-ev-1'),
+        runId: asResearchRunId('run-ev-1'),
         claimType: 'funding-round',
         normalizedValue: 'raised Series B',
         source: 'test',
         reliabilityTier: 'PUBLIC_RECORD',
-        observedAt: new Date(),
-        freshnessExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        observedAt: new Date().toISOString(),
+        freshnessExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         confidence: 0.9,
         confidenceBreakdown: { sourceReliability: 0.9, extractionConfidence: 0.9, corroboration: 0.9 },
         provenance: [],
+        evidenceFingerprint: 'fingerprint-ev-1',
       }),
     ];
 
     const draft = await deps.executionService.prepareDraft(ctx, sequence.id as string, plan, lead, evidence);
     if (draft.status !== 'AWAITING_APPROVAL') throw new Error(`Expected AWAITING_APPROVAL, got ${draft.status}`);
 
-    await deps.allowlistRepo.add(ctx, { channel: 'email', address: plan.recipient.address, approvedBy: 'test-harness' });
+    await deps.allowlistRepo.add(ctx, { channel: 'email', address: 'test@example.com', approvedBy: 'test-harness' });
     if (options.approve) {
       deps.approvalPort.seed({
         approvalId: 'approval-1',
@@ -207,7 +262,7 @@ describe('OutreachExecutionService production idempotency hardening', () => {
         campaignId: campaign.id as string,
         sequenceId: sequence.id as string,
         executionId: draft.executionId as string,
-        recipientAddress: plan.recipient.address,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
         actionType: 'OUTREACH_EMAIL_SEND',
         outcome: 'APPROVED',
       });

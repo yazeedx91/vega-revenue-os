@@ -1,7 +1,7 @@
 import type { TenantContext } from '@projectx/domain';
 import type { CorrelationId, EventId, OutreachExecutionId } from '@projectx/shared';
 import type { IAuditLog, IIdempotencyStore } from '@projectx/infrastructure';
-import type { IMessageExecutionRepository } from '../ports/outreach-repository.interface';
+import type { IMessageExecutionRepository, OutreachRepositoryContext } from '../ports/outreach-repository.interface';
 
 export type ReconciliationDecision = 'DELIVERED' | 'FAILED';
 
@@ -16,7 +16,7 @@ export class ReconciliationService {
   constructor(private readonly deps: ReconciliationServiceDependencies) {}
 
   async reconcile(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     executionId: OutreachExecutionId,
     decision: ReconciliationDecision,
     operatorId: string,
@@ -72,7 +72,7 @@ export class ReconciliationService {
   }
 
   private async auditReconciliation(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     executionId: string,
     decision: string,
     operatorId: string,

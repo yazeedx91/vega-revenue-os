@@ -28,6 +28,7 @@ export interface SendSafetyGateInput {
   ctx: TenantContext;
   campaign: OutreachCampaign;
   execution: OutreachMessageExecution;
+  recipientAddress: string;
   approvalId: string;
   actionType: string;
   estimatedCostUsd: number;
@@ -51,7 +52,7 @@ export class SendSafetyGate {
   constructor(private readonly deps: SendSafetyGateDependencies) {}
 
   async evaluate(input: SendSafetyGateInput): Promise<SafetyDecision> {
-    const { ctx, campaign, execution, approvalId, actionType, estimatedCostUsd } = input;
+    const { ctx, campaign, execution, recipientAddress, approvalId, actionType, estimatedCostUsd } = input;
 
     // 1. Tenant context sanity — defense in depth beyond repository-level
     // tenant scoping already enforced upstream.
@@ -60,18 +61,18 @@ export class SendSafetyGate {
     }
 
     // 2. Recipient allowlist — deny by default.
-    const allowed = await this.deps.allowlistRepository.isAllowed(ctx, execution.channel, execution.recipientAddress);
+    const allowed = await this.deps.allowlistRepository.isAllowed(ctx, execution.channel, recipientAddress);
     if (!allowed) {
-      return this.deny(input, 'NOT_ALLOWLISTED', `Recipient ${execution.recipientAddress} is not on the tenant allowlist`);
+      return this.deny(input, 'NOT_ALLOWLISTED', 'Recipient is not on the tenant allowlist');
     }
 
     // 3. Suppression / opt-out — blocks every outbound path unconditionally.
-    const suppression = await this.deps.suppressionRepository.isSuppressed(ctx, execution.recipientAddress);
+    const suppression = await this.deps.suppressionRepository.isSuppressed(ctx, recipientAddress);
     if (suppression) {
       return this.deny(
         input,
         'SUPPRESSED',
-        `Recipient ${execution.recipientAddress} is suppressed (${suppression.suppressionType} via ${suppression.source})`,
+        `Recipient is suppressed (${suppression.suppressionType} via ${suppression.source})`,
       );
     }
 
@@ -83,7 +84,7 @@ export class SendSafetyGate {
       sequenceId: execution.sequenceId,
       executionId: execution.id,
       idempotencyKey: execution.idempotencyKey as IdempotencyKey,
-      recipientAddress: execution.recipientAddress,
+      recipientFingerprint: execution.recipientFingerprint!,
       actionType,
       correlationId: ctx.correlationId as CorrelationId,
     });
@@ -248,11 +249,11 @@ export class SendSafetyGate {
       metadata: {
         decision: codeOrDecision,
         tenantId: input.ctx.tenantId,
-        recipientAddress: input.execution.recipientAddress,
         campaignId: input.campaign.id,
         sequenceId: input.execution.sequenceId,
         executionId: input.execution.id,
         approvalId: input.approvalId,
+        recipientFingerprint: input.execution.recipientFingerprint,
         correlationId: input.ctx.correlationId,
         actor: 'actor' in input.ctx ? (input.ctx as Record<string, unknown>).actor : 'system',
       },

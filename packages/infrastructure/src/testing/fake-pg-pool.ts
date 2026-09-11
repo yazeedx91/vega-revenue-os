@@ -14,6 +14,7 @@ export interface FakeQueryResult {
 }
 
 interface StoredRow {
+  [key: string]: unknown;
   tenant_id: string;
   id: string;
   payload: unknown;
@@ -113,14 +114,51 @@ export class FakePgPool {
     }
 
     if (/^INSERT/i.test(normalized) && tableName) {
+      const columnsMatch = normalized.match(/\(([^)]+)\)\s*VALUES/i);
+      const columns = columnsMatch?.[1].split(',').map((column) => column.trim());
+      if (columns?.includes('workspace_id')) {
+        const values: Record<string, unknown> = {};
+        columns.forEach((column, index) => { values[column] = params[index]; });
+        const tenantId = values.tenant_id as string;
+        const id = values.id as string;
+        const key = this.rowKey(tenantId, id);
+        const table = this.tableFor(tableName);
+        if (table.has(key)) return { rows: [], rowCount: 0 };
+        table.set(key, {
+          ...values,
+          tenant_id: tenantId,
+          id,
+          payload: JSON.parse(values.payload as string),
+          version: values.version as number,
+          updated_at: new Date(),
+        });
+        return { rows: [{ id }], rowCount: 1 };
+      }
       const [tenantId, id, payload, version] = params as [string, string, string, number];
       const key = this.rowKey(tenantId, id);
       const table = this.tableFor(tableName);
-      if (table.has(key)) {
-        // ON CONFLICT ... DO NOTHING
-        return { rows: [], rowCount: 0 };
-      }
+      if (table.has(key)) return { rows: [], rowCount: 0 };
       table.set(key, { tenant_id: tenantId, id, payload: JSON.parse(payload), version, updated_at: new Date() });
+      return { rows: [{ id }], rowCount: 1 };
+    }
+
+    if (/^UPDATE/i.test(normalized) && tableName && normalized.includes('workspace_id')) {
+      const tenantId = params[0] as string;
+      const workspaceId = params[1] as string;
+      const id = params[2] as string;
+      const table = this.tableFor(tableName);
+      const key = this.rowKey(tenantId, id);
+      const existing = table.get(key);
+      const expectedVersion = params[params.length - 1] as number;
+      if (!existing || existing.workspace_id !== workspaceId || existing.version !== expectedVersion) return { rows: [], rowCount: 0 };
+      const assignments = normalized.match(/SET\s+([\s\S]+?)\s+WHERE/i)?.[1].split(',') ?? [];
+      const updated = { ...existing };
+      for (const assignment of assignments) {
+        const match = assignment.trim().match(/^(\w+)\s*=\s*\$(\d+)/);
+        if (match) updated[match[1]] = params[Number(match[2]) - 1];
+      }
+      if (typeof updated.payload === 'string') updated.payload = JSON.parse(updated.payload);
+      table.set(key, updated);
       return { rows: [{ id }], rowCount: 1 };
     }
 
@@ -287,6 +325,7 @@ export class FakePgPool {
         const expected = params[paramIndex];
         if (column === 'tenant_id') return row.tenant_id === expected;
         if (column === 'id') return row.id === expected;
+        if (column in row) return row[column] === expected;
         const camelKey = column.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
         const payload = row.payload as Record<string, unknown>;
         return payload[camelKey] === expected;

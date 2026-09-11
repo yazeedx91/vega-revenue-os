@@ -57,8 +57,8 @@ describe('ConversationHandlingService — Phase 14 Milestone 6 extended fields',
     const reply = conversation!.messages[0];
 
     expect(reply.messageIdHeader).toBe('<msg-1@prospect.example.com>');
-    expect(reply.sender).toBe('prospect@example.com');
-    expect(reply.recipientAddress).toBe('sales@tenant-a.example.com');
+    expect(reply.sender).toBeUndefined();
+    expect(reply.recipientAddress).toBeUndefined();
     expect(reply.subject).toBe('Re: Hello');
     expect(reply.htmlBody).toBe('<p>Sounds good</p>');
     expect(reply.inReplyTo).toBe('<outbound-1@tenant-a.example.com>');

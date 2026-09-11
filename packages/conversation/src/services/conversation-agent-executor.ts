@@ -1,4 +1,4 @@
-import type { TenantContext } from '@projectx/domain';
+import type { ConversationRepositoryContext } from '../ports/conversation-repository.interface';
 import type {
   AIExecutionRequest,
   AIExecutionResult,
@@ -20,8 +20,11 @@ export class ConversationAgentExecutor implements IAgentExecutor {
       costUsd: 0,
     };
 
-    const ctx: TenantContext = {
+    const workspaceId = request.context.authorization?.workspaceId;
+    if (!workspaceId) return this.failed(request, 'Trusted workspace authorization context is required', startedAt, modelUsage);
+    const ctx: ConversationRepositoryContext = {
       tenantId: request.tenantId,
+      workspaceId,
       correlationId: request.correlationId,
     };
 

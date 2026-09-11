@@ -271,6 +271,9 @@ importers:
       '@projectx/ai-runtime':
         specifier: workspace:*
         version: link:../../packages/ai-runtime
+      '@projectx/application':
+        specifier: workspace:*
+        version: link:../../packages/application
       '@projectx/control-plane':
         specifier: workspace:*
         version: link:../../packages/control-plane

@@ -2,7 +2,7 @@ import type { CampaignId, CorrelationId, EventId, LeadId, TenantId, UserId } fro
 import { fail, ok, type Result } from '@projectx/shared';
 import { AggregateRoot } from '../aggregate/aggregate-root';
 import type { OutreachChannel } from './value-objects/provider-contracts';
-import type { Recipient } from './value-objects/recipient';
+import { assertProtectedRecipient, type RecipientProtectionState } from './value-objects/protected-recipient';
 import type { SequenceStep } from './value-objects/sequence-step';
 import * as Events from './campaign-events';
 import { canTransitionCampaign, type CampaignStatus } from './campaign-status';
@@ -15,9 +15,12 @@ export interface CampaignBudget {
 export interface CampaignProps {
   id?: CampaignId;
   tenantId: TenantId;
+  workspaceId: string;
   missionId?: string;
   leadId: LeadId;
-  recipient: Recipient;
+  contactId: string;
+  recipientFingerprint?: string;
+  recipientProtectionState: RecipientProtectionState;
   channel: OutreachChannel;
   steps: SequenceStep[];
   budget?: CampaignBudget;
@@ -36,9 +39,12 @@ export class CampaignInvariantError extends Error {
 }
 
 export class OutreachCampaign extends AggregateRoot<CampaignId> {
+  public readonly workspaceId: string;
   public readonly missionId?: string;
   public readonly leadId: LeadId;
-  public readonly recipient: Recipient;
+  public readonly contactId: string;
+  public readonly recipientFingerprint?: string;
+  public readonly recipientProtectionState: RecipientProtectionState;
   public readonly channel: OutreachChannel;
   public readonly steps: SequenceStep[];
   public readonly budget: CampaignBudget;
@@ -50,9 +56,12 @@ export class OutreachCampaign extends AggregateRoot<CampaignId> {
 
   private constructor(props: CampaignProps) {
     super(props.tenantId, props.id!);
+    this.workspaceId = props.workspaceId;
     this.missionId = props.missionId;
     this.leadId = props.leadId;
-    this.recipient = props.recipient;
+    this.contactId = props.contactId;
+    this.recipientFingerprint = props.recipientFingerprint;
+    this.recipientProtectionState = props.recipientProtectionState;
     this.channel = props.channel;
     this.steps = props.steps;
     this.budget = props.budget ?? {};
@@ -68,9 +77,10 @@ export class OutreachCampaign extends AggregateRoot<CampaignId> {
     correlationId: CorrelationId,
     eventId: EventId,
   ): OutreachCampaign {
-    if (!props.recipient || !props.channel) {
-      throw new CampaignInvariantError('Recipient and channel are required');
+    if (!props.contactId || !props.channel) {
+      throw new CampaignInvariantError('Contact and channel are required');
     }
+    assertProtectedRecipient(props);
     if (props.steps.length === 0) {
       throw new CampaignInvariantError('Campaign must have at least one sequence step');
     }

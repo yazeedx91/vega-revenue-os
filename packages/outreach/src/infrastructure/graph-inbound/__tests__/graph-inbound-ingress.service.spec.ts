@@ -13,6 +13,7 @@ import { GraphReplyCorrelator } from '../graph-reply-correlator';
 import { StubGraphInboundMessageFetcher } from '../stub-graph-inbound-message-fetcher';
 import { GraphInboundIngressService } from '../graph-inbound-ingress.service';
 import type { GraphChangeNotification, GraphMessagePayload } from '../graph-inbound.types';
+import type { IHistoricalRecipientFingerprint } from '../../ports/outbound-recipient-recovery.interface';
 
 class FakeSecretsProvider implements ISecretsProvider {
   constructor(private readonly secrets: Record<string, string> = {}) {}
@@ -56,9 +57,14 @@ function makeGraphMessage(overrides: Partial<GraphMessagePayload> = {}): GraphMe
     toRecipients: [{ emailAddress: { address: MAILBOX } }],
     body: { contentType: 'text', content: 'Sounds great, thanks!' },
     receivedDateTime: '2026-01-01T12:00:00.000Z',
+    internetMessageHeaders: [{ name: 'In-Reply-To', value: '<msg-1@example.com>' }],
     ...overrides,
   };
 }
+
+const fakeHistorical: IHistoricalRecipientFingerprint = {
+  fingerprintEmailForVersion: async (_tenantId: string, rawEmail: string, keyVersion: string) => `h1.${keyVersion}.${rawEmail}`,
+};
 
 async function buildHarness() {
   const tenantEmailConfigRepository = new InMemoryTenantEmailConfigRepository();
@@ -72,18 +78,23 @@ async function buildHarness() {
   });
 
   const messageExecutionRepository = new InMemoryMessageExecutionRepository();
-  const ctx: TenantContext = { tenantId: asTenantId(TENANT_A), correlationId: asCorrelationId('corr-1') };
+  const ctx: TenantContext = { tenantId: asTenantId(TENANT_A), workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
   const execution = OutreachMessageExecution.create(
     {
       id: asOutreachExecutionId(nextId('exec')),
       tenantId: ctx.tenantId,
+      workspaceId: 'workspace-1',
       campaignId: asCampaignId('camp-1'),
       sequenceId: asSequenceId('seq-1'),
       stepNumber: 1,
       leadId: 'lead-1',
-      recipientAddress: 'prospect@example.com',
+      contactId: 'contact-1',
+      recipientFingerprint: 'h1.1.prospect@example.com',
+      recipientCiphertext: 'e1.1.prospect-cipher',
+      recipientProtectionState: 'PROTECTED',
       channel: 'email',
       idempotencyKey: asIdempotencyKey(nextId('idmp')),
+      providerMessageId: '<msg-1@example.com>',
     },
     ctx.correlationId,
     asEventId(nextId('evt')),
@@ -98,6 +109,8 @@ async function buildHarness() {
   const subscriptionRepository = new InMemoryGraphSubscriptionRepository();
   await subscriptionRepository.save(ctx, {
     tenantId: TENANT_A,
+    workspaceId: 'workspace-1',
+    subscriptionScope: 'WORKSPACE_BOUND',
     subscriptionId: 'sub-1',
     resource: `Users/${MAILBOX}/Messages`,
     notificationUrl: 'https://example.com/webhook',
@@ -111,11 +124,11 @@ async function buildHarness() {
     subscriptionRepository,
     messageFetcher,
     normalizer: new GraphMessageNormalizer(),
-    correlator: new GraphReplyCorrelator({ messageExecutionRepository }),
+    correlator: new GraphReplyCorrelator({ messageExecutionRepository, historicalRecipientFingerprint: fakeHistorical }),
     idempotencyStore,
   });
 
-  return { service, messageFetcher, execution };
+  return { service, messageFetcher, execution, idempotencyStore, messageExecutionRepository };
 }
 
 describe('GraphInboundIngressService', () => {
@@ -129,7 +142,7 @@ describe('GraphInboundIngressService', () => {
     expect(result.event.content).toContain('Sounds great');
   });
 
-  it('rejects a notification with an invalid clientState', async () => {
+  it('rejects a notification with an invalid clientState before mutation', async () => {
     const { service } = await buildHarness();
     const result = await service.ingest(makeNotification({ clientState: 'forged' }));
 
@@ -166,6 +179,47 @@ describe('GraphInboundIngressService', () => {
     expect(result.reasonCode).toBe('TENANT_NOT_FOUND');
   });
 
+  it('rejects a forged clientState before idempotency or durable mutation', async () => {
+    const { service } = await buildHarness();
+    const forged = makeNotification({ clientState: 'forged' });
+    const result = await service.ingest(forged);
+
+    expect(result.status).toBe('REJECTED');
+    if (result.status === 'REJECTED') {
+      expect(result.reasonCode).toBe('INVALID_CLIENT_STATE');
+    }
+  });
+
+  it('rejects a workspace A subscription authorizing workspace B execution', async () => {
+    const { service, messageExecutionRepository } = await buildHarness();
+    const otherCtx: TenantContext = { tenantId: asTenantId(TENANT_A), workspaceId: 'workspace-2', correlationId: asCorrelationId('corr-2') };
+    const otherExecution = OutreachMessageExecution.create(
+      {
+        id: asOutreachExecutionId('exec-other'),
+        tenantId: otherCtx.tenantId,
+        workspaceId: 'workspace-2',
+        campaignId: asCampaignId('camp-2'),
+        sequenceId: asSequenceId('seq-2'),
+        stepNumber: 1,
+        leadId: 'lead-2',
+        contactId: 'contact-2',
+        recipientFingerprint: 'h1.1.prospect@example.com',
+        recipientCiphertext: 'e1.1.other-cipher',
+        recipientProtectionState: 'PROTECTED',
+        channel: 'email',
+        idempotencyKey: asIdempotencyKey('idmp-other'),
+        providerMessageId: '<msg-1@example.com>',
+      },
+      otherCtx.correlationId,
+      asEventId('evt-other'),
+    );
+    await messageExecutionRepository.save(otherCtx, otherExecution);
+
+    const result = await service.ingest(makeNotification());
+
+    expect(result.status).toBe('NOT_CORRELATED');
+  });
+
   it('treats a duplicate notification as DUPLICATE and does not reprocess it', async () => {
     const { service, messageFetcher } = await buildHarness();
     const notification = makeNotification();
@@ -176,7 +230,6 @@ describe('GraphInboundIngressService', () => {
     const second = await service.ingest(notification);
     expect(second.status).toBe('DUPLICATE');
 
-    // Only one fetch: fetching + normalizing does not repeat for the duplicate.
     expect(await messageFetcher.getMessage(MAILBOX, 'graph-msg-1')).not.toBeNull();
   });
 

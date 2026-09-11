@@ -10,11 +10,15 @@ describe('OutreachMessageExecution lifecycle transitions', () => {
     return OutreachMessageExecution.create(
       {
         tenantId,
+        workspaceId: 'workspace-1',
         campaignId: asCampaignId('camp-1'),
         sequenceId: asSequenceId('seq-1'),
         stepNumber: 1,
         leadId: 'lead-1',
-        recipientAddress: 'prospect@example.com',
+        contactId: 'contact-1',
+        recipientFingerprint: 'h1.1.fingerprint123',
+        recipientCiphertext: 'e1.1.ciphertext456',
+        recipientProtectionState: 'PROTECTED',
         channel: 'email',
         idempotencyKey: asIdempotencyKey('idmp-1'),
       },

@@ -27,6 +27,7 @@ const replySignal = defineSignal<[ReplyReceivedSignal]>('replyReceived');
 
 export interface OutreachSequenceWorkflowInput {
   tenantId: string;
+  workspaceId: string;
   correlationId: string;
   sequenceId: string;
   plan: OutreachPlan;
@@ -60,6 +61,7 @@ export async function OutreachSequenceWorkflow(
 
   const ctx = {
     tenantId: input.tenantId,
+    workspaceId: input.workspaceId,
     correlationId: input.correlationId,
   };
 
@@ -114,6 +116,7 @@ export async function OutreachSequenceWorkflow(
         await recordResponse(ctx, approval.executionId, reply.responseType);
         await interpretReply(ctx, {
           tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
           leadId: input.lead.id,
           channel: reply.channel,
           providerMessageId: reply.providerMessageId,

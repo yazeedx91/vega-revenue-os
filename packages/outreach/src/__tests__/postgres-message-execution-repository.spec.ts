@@ -14,18 +14,22 @@ import { PostgresMessageExecutionRepository } from '../infrastructure/postgres-m
 
 describe('PostgresMessageExecutionRepository', () => {
   const tenantId = asTenantId('tenant-1');
-  const ctx = { tenantId, correlationId: asCorrelationId('corr-1') };
+  const ctx = { tenantId, workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
 
   function makeExecution() {
     return OutreachMessageExecution.create(
       {
         id: asOutreachExecutionId('exec-1'),
         tenantId,
+        workspaceId: 'workspace-1',
         campaignId: asCampaignId('camp-1'),
         sequenceId: asSequenceId('seq-1'),
         stepNumber: 1,
         leadId: 'lead-1',
-        recipientAddress: 'a@b.com',
+        contactId: 'contact-1',
+        recipientFingerprint: 'h1.1.fingerprint123',
+        recipientCiphertext: 'e1.1.ciphertext456',
+        recipientProtectionState: 'PROTECTED',
         channel: 'email',
         idempotencyKey: asIdempotencyKey('idem-1'),
       },

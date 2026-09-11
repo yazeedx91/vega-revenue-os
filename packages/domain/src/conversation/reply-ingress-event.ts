@@ -15,6 +15,7 @@ import type { LeadId } from '@projectx/shared';
  */
 export interface ReplyIngressEvent {
   readonly tenantId: string;
+  readonly workspaceId: string;
   readonly leadId: LeadId;
   readonly channel: string;
   readonly providerMessageId: string;

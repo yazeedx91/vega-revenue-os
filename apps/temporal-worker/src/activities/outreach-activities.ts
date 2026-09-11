@@ -2,11 +2,12 @@ import type { Lead, OutreachPlan, ResearchEvidence, TenantContext } from '@proje
 import type { ConversationHandlingService } from '@projectx/conversation';
 import type { ReplyIngressEvent } from '@projectx/conversation';
 import { persistReplyBasedOptOut as persistReplyBasedOptOutShared } from '@projectx/conversation';
-import type { IMessageExecutionRepository, ISequenceRepository, ISuppressionRepository, OutreachExecutionService } from '@projectx/outreach';
+import type { IMessageExecutionRepository, ISequenceRepository, ISuppressionRepository, OutreachExecutionService, OutreachRepositoryContext } from '@projectx/outreach';
 import type { ApprovalId, CorrelationId, EventId, OutreachExecutionId, SequenceId, TenantId } from '@projectx/shared';
 
 export interface OutreachActivitiesContext {
   tenantId: string;
+  workspaceId: string;
   correlationId: string;
 }
 
@@ -57,9 +58,10 @@ function getConversationService(): ConversationHandlingService {
   return conversationService;
 }
 
-function toTenantContext(ctx: OutreachActivitiesContext): TenantContext {
+function toTenantContext(ctx: OutreachActivitiesContext): OutreachRepositoryContext {
   return {
     tenantId: ctx.tenantId as TenantId,
+    workspaceId: ctx.workspaceId,
     correlationId: ctx.correlationId as CorrelationId,
   };
 }

@@ -12,6 +12,7 @@ import { ReplyMessage } from './reply-message';
 export interface ConversationProps {
   readonly id: ConversationId;
   readonly tenantId: TenantId;
+  readonly workspaceId: string;
   readonly leadId: LeadId;
   readonly channel: string;
   readonly recipientAddress?: string;
@@ -30,6 +31,7 @@ export interface ConversationProps {
 }
 
 export class Conversation extends AggregateRoot<ConversationId> {
+  public readonly workspaceId: string;
   public readonly leadId: LeadId;
   public readonly channel: string;
   public readonly recipientAddress?: string;
@@ -76,6 +78,7 @@ export class Conversation extends AggregateRoot<ConversationId> {
 
   private constructor(props: ConversationProps) {
     super(props.tenantId, props.id);
+    this.workspaceId = props.workspaceId;
     this.leadId = props.leadId;
     this.channel = props.channel;
     this.recipientAddress = props.recipientAddress;

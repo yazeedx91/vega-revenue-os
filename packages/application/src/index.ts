@@ -13,3 +13,4 @@ export * from './persistence/in-memory-mission.repository';
 export * from './persistence/in-memory-agent.repository';
 export * from './services/contact-channel-protector.interface';
 export * from './services/contact-channel-protector';
+export * from './services/outbound-recipient-recovery';

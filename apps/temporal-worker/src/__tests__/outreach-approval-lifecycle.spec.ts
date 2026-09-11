@@ -41,6 +41,8 @@ import {
   OutreachSequenceLifecycleService,
   SendSafetyGate,
   StubEmailProvider,
+  type IHistoricalRecipientFingerprint,
+  type IOutboundRecipientRecovery,
 } from '@projectx/outreach';
 import {
   ApprovalApplicationService,
@@ -55,6 +57,7 @@ import {
   asCorrelationId,
   asEventId,
   asICPProfileId,
+  asICPProfileVersionId,
   asIdempotencyKey,
   asLeadId,
   asOutreachExecutionId,
@@ -91,7 +94,7 @@ async function isReachable(address: string): Promise<boolean> {
 }
 
 const tenantId = asTenantId(`tenant-approval-lifecycle-${Date.now()}`);
-const ctx: TenantContext = { tenantId, correlationId: asCorrelationId('corr-approval-lifecycle') };
+const ctx: TenantContext = { tenantId, workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-approval-lifecycle') };
 
 const fakeReasoningEngine: IReasoningEngine = {
   async reason(): Promise<ReasoningOutput> {
@@ -118,6 +121,19 @@ const fakeValidator: IOutputValidator = {
 
 const RECIPIENT = 'approval-lifecycle-test@example.com';
 
+class TestRecipientRecovery implements IOutboundRecipientRecovery {
+  async recoverEmailForSend(_tenantId: string, recipientCiphertext: string): Promise<string> {
+    return recipientCiphertext === 'e1.1.approval-lifecycle' ? RECIPIENT : 'unknown@example.com';
+  }
+}
+
+class TestHistoricalRecipientFingerprint implements IHistoricalRecipientFingerprint {
+  async fingerprintEmailForVersion(_tenantId: string, rawEmail: string, keyVersion: string): Promise<string> {
+    if (rawEmail === RECIPIENT && keyVersion === '1') return 'h1.1.approval-lifecycle';
+    return `h1.${keyVersion}.unknown`;
+  }
+}
+
 function buildPlan(campaignId: string, sequenceId: string, leadId: string): OutreachPlan {
   return {
     campaignId: asCampaignId(campaignId),
@@ -125,10 +141,9 @@ function buildPlan(campaignId: string, sequenceId: string, leadId: string): Outr
     leadId: asLeadId(leadId),
     recipient: {
       contactId: asContactId(RECIPIENT),
-      name: RECIPIENT,
-      email: RECIPIENT,
-      channel: 'email',
-      address: RECIPIENT,
+      recipientFingerprint: 'h1.1.approval-lifecycle',
+      recipientCiphertext: 'e1.1.approval-lifecycle',
+      recipientProtectionState: 'PROTECTED',
     },
     channel: 'email',
     steps: [
@@ -151,9 +166,11 @@ function makeLead(leadId: string): Lead {
   return {
     id: asLeadId(leadId),
     tenantId,
+    workspaceId: 'workspace-1',
     accountId: asAccountId('acc-approval-lifecycle'),
     contactId: asContactId(RECIPIENT),
     icpProfileId: asICPProfileId('icp-approval-lifecycle'),
+    icpProfileVersionId: asICPProfileVersionId('icp-approval-lifecycle-v1'),
     scores: { icpMatch: 1, signalScore: 1, intentScore: 1, evidenceConfidence: 1, overall: 1 },
     status: 'QUALIFIED',
     evidenceReferences: [],
@@ -226,6 +243,8 @@ describe('Phase 14.8 approval-wait lifecycle (Temporal integration)', () => {
       schedulePolicy: new InMemorySequenceSchedulePolicy(),
       personalizationService,
       safetyGate,
+      recipientRecovery: new TestRecipientRecovery(),
+      historicalRecipientFingerprint: new TestHistoricalRecipientFingerprint(),
       generateExecutionId: () => `exec-${++seed}-${randomUUID().slice(0, 8)}`,
       generateEventId: () => asEventId(`evt-${++seed}-${randomUUID().slice(0, 8)}`),
       channelCostEstimate: () => 0.01,
@@ -291,9 +310,12 @@ describe('Phase 14.8 approval-wait lifecycle (Temporal integration)', () => {
       {
         id: plan.campaignId,
         tenantId,
+        workspaceId: 'workspace-1',
         missionId: 'approval-lifecycle-regression',
         leadId: plan.leadId,
-        recipient: plan.recipient,
+        contactId: plan.recipient.contactId as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         channel: 'email',
         steps: plan.steps,
       },
@@ -309,9 +331,13 @@ describe('Phase 14.8 approval-wait lifecycle (Temporal integration)', () => {
       {
         id: plan.sequenceId,
         tenantId,
+        workspaceId: 'workspace-1',
         campaignId: plan.campaignId,
         leadId: plan.leadId,
-        recipient: plan.recipient,
+        contactId: plan.recipient.contactId as string,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientCiphertext: plan.recipient.recipientCiphertext,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         steps: plan.steps,
       },
       correlationId,

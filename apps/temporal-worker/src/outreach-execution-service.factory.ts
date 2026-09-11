@@ -13,6 +13,7 @@ import {
   RegexPIIScrubber,
 } from '@projectx/conversation';
 import { ApprovalVerificationAdapter, InMemoryApprovalRepository, PostgresApprovalRepository } from '@projectx/mission-orchestrator';
+import { HistoricalRecipientFingerprint, OutboundRecipientRecovery } from '@projectx/application';
 import type { IOutputValidator, IReasoningEngine, OutputValidationResult, ReasoningOutput } from '@projectx/ai-runtime';
 import {
   AzureKeyVaultSecretsProvider,
@@ -97,6 +98,7 @@ export interface DurableAdapters {
   readonly rateLimiter: IRateLimiter;
   readonly auditLog: IAuditLog;
   readonly redisManager?: RedisConnectionManager;
+  readonly secretsProvider: ISecretsProvider;
   dispose(): Promise<void>;
 }
 
@@ -136,12 +138,14 @@ async function resolveSecretValue(
 export async function createDurableAdapters(): Promise<DurableAdapters> {
   const config = loadControlledCommunicationConfig();
   validateControlledCommunicationConfig(config);
+  const secretsProvider = createSecretsProvider(process.env.AZURE_KEY_VAULT_URL);
 
   if (!config.databaseUrl) {
     const dispose = async (): Promise<void> => {};
     return {
       rateLimiter: new InMemoryRateLimiter(),
       auditLog: new InMemoryAuditLog(),
+      secretsProvider,
       dispose,
     };
   }
@@ -160,14 +164,14 @@ export async function createDurableAdapters(): Promise<DurableAdapters> {
       await pool.end();
       await shutdownOpenTelemetry();
     };
-    return { pool, cache, rateLimiter, auditLog, redisManager, dispose };
+    return { pool, cache, rateLimiter, auditLog, redisManager, secretsProvider, dispose };
   }
 
   const dispose = async (): Promise<void> => {
     await pool.end();
     await shutdownOpenTelemetry();
   };
-  return { pool, rateLimiter, auditLog, dispose };
+  return { pool, rateLimiter, auditLog, secretsProvider, dispose };
 }
 
 export function createConversationHandlingService(adapters: DurableAdapters) {
@@ -324,6 +328,8 @@ export async function createOutreachExecutionService(adapters: DurableAdapters, 
     personalizationService,
     safetyGate,
     idempotencyStore,
+    recipientRecovery: new OutboundRecipientRecovery(adapters.secretsProvider),
+    historicalRecipientFingerprint: new HistoricalRecipientFingerprint(adapters.secretsProvider),
     generateExecutionId: () => `exec-${Date.now()}`,
     generateEventId: () => asEventId(`evt-${Date.now()}`),
     channelCostEstimate: () => 0.05,

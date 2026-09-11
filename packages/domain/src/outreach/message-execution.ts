@@ -4,17 +4,22 @@ import { randomUUID } from 'crypto';
 import { AggregateRoot } from '../aggregate/aggregate-root';
 import type { MessageDraft } from './value-objects/message-draft';
 import type { OutreachChannel } from './value-objects/provider-contracts';
+import { assertProtectedRecipientSnapshot, type RecipientProtectionState } from './value-objects/protected-recipient';
 import * as Events from './message-execution-events';
 import { canTransitionMessageExecution, type MessageExecutionStatus } from './message-execution-status';
 
 export interface MessageExecutionProps {
   id?: OutreachExecutionId;
   tenantId: TenantId;
+  workspaceId: string;
   campaignId: CampaignId;
   sequenceId: SequenceId;
   stepNumber: number;
   leadId: string;
-  recipientAddress: string;
+  contactId: string;
+  recipientFingerprint?: string;
+  recipientCiphertext?: string;
+  recipientProtectionState: RecipientProtectionState;
   channel: OutreachChannel;
   idempotencyKey: IdempotencyKey;
   messageId?: OutreachMessageId;
@@ -45,11 +50,15 @@ export class MessageExecutionInvariantError extends Error {
 }
 
 export class OutreachMessageExecution extends AggregateRoot<OutreachExecutionId> {
+  public readonly workspaceId: string;
   public readonly campaignId: CampaignId;
   public readonly sequenceId: SequenceId;
   public readonly stepNumber: number;
   public readonly leadId: string;
-  public readonly recipientAddress: string;
+  public readonly contactId: string;
+  public readonly recipientFingerprint?: string;
+  public readonly recipientCiphertext?: string;
+  public readonly recipientProtectionState: RecipientProtectionState;
   public readonly channel: OutreachChannel;
   public readonly idempotencyKey: IdempotencyKey;
   public status: MessageExecutionStatus;
@@ -73,11 +82,15 @@ export class OutreachMessageExecution extends AggregateRoot<OutreachExecutionId>
 
   private constructor(props: MessageExecutionProps) {
     super(props.tenantId, props.id!);
+    this.workspaceId = props.workspaceId;
     this.campaignId = props.campaignId;
     this.sequenceId = props.sequenceId;
     this.stepNumber = props.stepNumber;
     this.leadId = props.leadId;
-    this.recipientAddress = props.recipientAddress;
+    this.contactId = props.contactId;
+    this.recipientFingerprint = props.recipientFingerprint;
+    this.recipientCiphertext = props.recipientCiphertext;
+    this.recipientProtectionState = props.recipientProtectionState;
     this.channel = props.channel;
     this.idempotencyKey = props.idempotencyKey;
     this.status = props.status ?? 'PENDING';
@@ -105,6 +118,8 @@ export class OutreachMessageExecution extends AggregateRoot<OutreachExecutionId>
     correlationId: CorrelationId,
     eventId: EventId,
   ): OutreachMessageExecution {
+    if (!props.contactId) throw new MessageExecutionInvariantError('Contact is required');
+    assertProtectedRecipientSnapshot(props);
     const id = props.id ?? asOutreachExecutionId(randomUUID());
     const execution = new OutreachMessageExecution({ ...props, id, status: 'PENDING' });
     execution.applyEvent(

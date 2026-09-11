@@ -4,6 +4,7 @@ export * from './in-memory-message-execution-repository';
 export * from './postgres-campaign-repository';
 export * from './postgres-sequence-repository';
 export * from './postgres-message-execution-repository';
+export * from './repository-outbound-recipient-source';
 export * from './in-memory-provider-registry';
 export * from './in-memory-schedule-policy';
 export * from './stub-email-provider';

@@ -12,7 +12,7 @@ export interface FakeApprovalRecord {
   readonly campaignId: string;
   readonly sequenceId: string;
   readonly executionId: string;
-  readonly recipientAddress: string;
+  readonly recipientFingerprint: string;
   readonly actionType: string;
   readonly outcome: ApprovalVerificationOutcome;
 }
@@ -44,7 +44,7 @@ export class InMemoryApprovalVerificationPort implements IApprovalVerificationPo
       record.campaignId !== (request.campaignId as string) ||
       record.sequenceId !== (request.sequenceId as string) ||
       record.executionId !== (request.executionId as string) ||
-      record.recipientAddress !== request.recipientAddress
+      record.recipientFingerprint !== request.recipientFingerprint
     ) {
       return { outcome: 'WRONG_TARGET', reason: 'Target mismatch' };
     }

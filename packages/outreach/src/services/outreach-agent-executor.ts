@@ -1,6 +1,6 @@
 import type { IAgentExecutor } from '@projectx/ai-runtime';
 import { OutreachCampaign, OutreachSequence, type Lead, type ResearchEvidence } from '@projectx/domain';
-import type { TenantContext } from '@projectx/domain';
+
 import type {
   AIExecutionRequest,
   AIExecutionResult,
@@ -10,7 +10,7 @@ import type {
   SequenceId,
 } from '@projectx/shared';
 import { asCampaignId, asCorrelationId, asEventId } from '@projectx/shared';
-import type { ICampaignRepository, ISequenceRepository } from '../ports/outreach-repository.interface';
+import type { ICampaignRepository, ISequenceRepository, OutreachRepositoryContext } from '../ports/outreach-repository.interface';
 import type { OutreachExecutionService } from '../application/outreach-execution.service';
 import type { OutreachPlanningService } from '../application/outreach-planning.service';
 
@@ -34,8 +34,11 @@ export class OutreachAgentExecutor implements IAgentExecutor {
       costUsd: 0,
     };
 
-    const ctx: TenantContext = {
+    const workspaceId = request.context.authorization?.workspaceId;
+    if (!workspaceId) return this.failed(request, startedAt, modelUsage, 'Trusted workspace authorization context is required');
+    const ctx: OutreachRepositoryContext = {
       tenantId: request.tenantId,
+      workspaceId,
       correlationId: request.correlationId,
     };
 
@@ -70,7 +73,7 @@ export class OutreachAgentExecutor implements IAgentExecutor {
   }
 
   private async planOutreach(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     request: AIExecutionRequest,
     startedAt: Date,
     modelUsage: ModelUsage,
@@ -83,7 +86,7 @@ export class OutreachAgentExecutor implements IAgentExecutor {
     };
 
     const campaignId = asCampaignId(input.campaignId ?? `campaign-${request.executionId}`);
-    const plan = this.deps.planningService.plan(ctx, {
+    const plan = await this.deps.planningService.plan(ctx, {
       campaignId,
       lead: input.lead,
       evidence: input.evidence,
@@ -95,8 +98,11 @@ export class OutreachAgentExecutor implements IAgentExecutor {
       {
         id: plan.campaignId,
         tenantId: ctx.tenantId,
+        workspaceId: input.lead.workspaceId,
         leadId: plan.leadId,
-        recipient: plan.recipient,
+        contactId: plan.recipient.contactId,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
         channel: plan.channel,
         steps: plan.steps,
         missionId: request.missionId,
@@ -109,9 +115,14 @@ export class OutreachAgentExecutor implements IAgentExecutor {
       {
         id: plan.sequenceId,
         tenantId: ctx.tenantId,
+        workspaceId: input.lead.workspaceId,
         campaignId: campaign.id,
         leadId: plan.leadId,
-        recipient: plan.recipient,
+        contactId: plan.recipient.contactId,
+        recipientFingerprint: plan.recipient.recipientFingerprint,
+        recipientCiphertext: plan.recipient.recipientCiphertext,
+        recipientProtectionState: plan.recipient.recipientProtectionState,
+        campaignRecipientFingerprint: campaign.recipientFingerprint,
         steps: plan.steps,
       },
       request.correlationId,
@@ -140,7 +151,7 @@ export class OutreachAgentExecutor implements IAgentExecutor {
   }
 
   private async draftMessage(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     request: AIExecutionRequest,
     startedAt: Date,
     modelUsage: ModelUsage,
@@ -182,7 +193,7 @@ export class OutreachAgentExecutor implements IAgentExecutor {
   }
 
   private async executeSend(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     request: AIExecutionRequest,
     startedAt: Date,
     modelUsage: ModelUsage,
@@ -238,7 +249,7 @@ export class OutreachAgentExecutor implements IAgentExecutor {
   }
 
   private async advanceSequence(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     request: AIExecutionRequest,
     startedAt: Date,
     modelUsage: ModelUsage,
@@ -268,7 +279,7 @@ export class OutreachAgentExecutor implements IAgentExecutor {
   }
 
   private async recordResponse(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     request: AIExecutionRequest,
     startedAt: Date,
     modelUsage: ModelUsage,

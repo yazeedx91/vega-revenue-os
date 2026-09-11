@@ -33,24 +33,30 @@ function makeGraphMessage(overrides: Partial<GraphMessagePayload> = {}): GraphMe
     toRecipients: [{ emailAddress: { address: MAILBOX } }],
     body: { contentType: 'text', content: 'Following up' },
     receivedDateTime: '2026-01-01T12:00:00.000Z',
+    internetMessageHeaders: [{ name: 'In-Reply-To', value: '<msg-1@example.com>' }],
     ...overrides,
   };
 }
 
 async function buildHarness() {
   const messageExecutionRepository = new InMemoryMessageExecutionRepository();
-  const ctx: TenantContext = { tenantId: asTenantId('tenant-a'), correlationId: asCorrelationId('corr-1') };
+  const ctx: TenantContext = { tenantId: asTenantId('tenant-a'), workspaceId: 'workspace-1', correlationId: asCorrelationId('corr-1') };
   const execution = OutreachMessageExecution.create(
     {
       id: asOutreachExecutionId(nextId('exec')),
       tenantId: ctx.tenantId,
+      workspaceId: 'workspace-1',
       campaignId: asCampaignId('camp-1'),
       sequenceId: asSequenceId('seq-1'),
       stepNumber: 1,
       leadId: 'lead-1',
-      recipientAddress: 'prospect@example.com',
+      contactId: 'contact-1',
+      recipientFingerprint: 'h1.1.prospect',
+      recipientCiphertext: 'e1.1.prospect-cipher',
+      recipientProtectionState: 'PROTECTED',
       channel: 'email',
       idempotencyKey: asIdempotencyKey(nextId('idmp')),
+      providerMessageId: '<msg-1@example.com>',
     },
     ctx.correlationId,
     asEventId(nextId('evt')),
@@ -115,7 +121,7 @@ describe('GraphReconciliationPoller', () => {
 
   it('counts NOT_CORRELATED and AMBIGUOUS outcomes without throwing', async () => {
     const { poller, messageFetcher } = await buildHarness();
-    messageFetcher.seed(MAILBOX, makeGraphMessage({ from: { emailAddress: { address: 'unrelated@example.com' } } }));
+    messageFetcher.seed(MAILBOX, makeGraphMessage({ from: { emailAddress: { address: 'unrelated@example.com' } }, internetMessageHeaders: [] }));
 
     const result = await poller.pollMailbox(TENANT_CONFIG);
 

@@ -2,22 +2,26 @@ import type { TenantContext } from '@projectx/domain';
 import type { MessageExecutionStatus, OutreachCampaign, OutreachSequence, OutreachMessageExecution } from '@projectx/domain';
 import type { CampaignId, OutreachExecutionId, SequenceId } from '@projectx/shared';
 
+export interface OutreachRepositoryContext extends TenantContext {
+  readonly workspaceId: string;
+}
+
 export interface ICampaignRepository {
-  save(ctx: TenantContext, campaign: OutreachCampaign): Promise<void>;
-  load(ctx: TenantContext, campaignId: CampaignId): Promise<OutreachCampaign | null>;
+  save(ctx: OutreachRepositoryContext, campaign: OutreachCampaign): Promise<void>;
+  load(ctx: OutreachRepositoryContext, campaignId: CampaignId): Promise<OutreachCampaign | null>;
 }
 
 export interface ISequenceRepository {
-  save(ctx: TenantContext, sequence: OutreachSequence): Promise<void>;
-  load(ctx: TenantContext, sequenceId: SequenceId): Promise<OutreachSequence | null>;
-  findByCampaign(ctx: TenantContext, campaignId: CampaignId): Promise<OutreachSequence[]>;
+  save(ctx: OutreachRepositoryContext, sequence: OutreachSequence): Promise<void>;
+  load(ctx: OutreachRepositoryContext, sequenceId: SequenceId): Promise<OutreachSequence | null>;
+  findByCampaign(ctx: OutreachRepositoryContext, campaignId: CampaignId): Promise<OutreachSequence[]>;
 }
 
 export interface IMessageExecutionRepository {
-  save(ctx: TenantContext, execution: OutreachMessageExecution): Promise<void>;
-  load(ctx: TenantContext, executionId: OutreachExecutionId): Promise<OutreachMessageExecution | null>;
-  findBySequence(ctx: TenantContext, sequenceId: SequenceId): Promise<OutreachMessageExecution[]>;
-  findByIdempotencyKey(ctx: TenantContext, key: string): Promise<OutreachMessageExecution | null>;
+  save(ctx: OutreachRepositoryContext, execution: OutreachMessageExecution): Promise<void>;
+  load(ctx: OutreachRepositoryContext, executionId: OutreachExecutionId): Promise<OutreachMessageExecution | null>;
+  findBySequence(ctx: OutreachRepositoryContext, sequenceId: SequenceId): Promise<OutreachMessageExecution[]>;
+  findByIdempotencyKey(ctx: OutreachRepositoryContext, key: string): Promise<OutreachMessageExecution | null>;
   /**
    * Phase 14 Milestone 6: locates the outbound execution whose
    * `providerMessageId` matches an inbound reply's correlation data
@@ -32,12 +36,12 @@ export interface IMessageExecutionRepository {
    * (e.g. most-recent-non-terminal) — this method never guesses on the
    * repository's behalf.
    */
-  findByRecipientAddress(ctx: TenantContext, address: string): Promise<OutreachMessageExecution[]>;
+  findByRecipientFingerprint(ctx: OutreachRepositoryContext, fingerprint: string): Promise<OutreachMessageExecution[]>;
 
   /**
    * P0-3: returns all executions for a tenant whose status is in the given set.
    * Used by the reconciliation query to surface DELIVERY_UNKNOWN and
    * REQUIRES_RECONCILIATION executions for operator review.
    */
-  findByStatus(ctx: TenantContext, status: MessageExecutionStatus[]): Promise<OutreachMessageExecution[]>;
+  findByStatus(ctx: OutreachRepositoryContext, status: MessageExecutionStatus[]): Promise<OutreachMessageExecution[]>;
 }

@@ -13,6 +13,8 @@ export interface PostgresGraphSubscriptionRepositoryConfig {
 
 interface GraphSubscriptionRow {
   tenant_id: string;
+  workspace_id: string | null;
+  subscription_scope: string;
   subscription_id: string;
   resource: string;
   notification_url: string;
@@ -33,9 +35,11 @@ export class PostgresGraphSubscriptionRepository implements IGraphSubscriptionRe
     await this.client.withTenant(ctx, (client) =>
       client.query(
         `INSERT INTO outreach.graph_subscriptions (
-           tenant_id, subscription_id, resource, notification_url, client_state, expiration_date_time, created_at, updated_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+           tenant_id, workspace_id, subscription_scope, subscription_id, resource, notification_url, client_state, expiration_date_time, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
          ON CONFLICT (tenant_id, subscription_id) DO UPDATE SET
+           workspace_id = EXCLUDED.workspace_id,
+           subscription_scope = EXCLUDED.subscription_scope,
            resource = EXCLUDED.resource,
            notification_url = EXCLUDED.notification_url,
            client_state = EXCLUDED.client_state,
@@ -43,6 +47,8 @@ export class PostgresGraphSubscriptionRepository implements IGraphSubscriptionRe
            updated_at = NOW()`,
         [
           record.tenantId,
+          record.workspaceId,
+          record.subscriptionScope,
           record.subscriptionId,
           record.resource,
           record.notificationUrl,
@@ -86,6 +92,8 @@ export class PostgresGraphSubscriptionRepository implements IGraphSubscriptionRe
   private toRecord(row: GraphSubscriptionRow): GraphSubscriptionRecord {
     return {
       tenantId: row.tenant_id,
+      workspaceId: row.workspace_id,
+      subscriptionScope: row.subscription_scope as GraphSubscriptionRecord['subscriptionScope'],
       subscriptionId: row.subscription_id,
       resource: row.resource,
       notificationUrl: row.notification_url,

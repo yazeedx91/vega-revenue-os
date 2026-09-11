@@ -16,7 +16,7 @@ export type GraphNormalizationOutcome =
  * event; attachment *content* is never fetched or stored in this
  * milestone).
  */
-export type GraphNormalizedReply = Omit<ReplyIngressEvent, 'tenantId' | 'leadId'> & {
+export type GraphNormalizedReply = Omit<ReplyIngressEvent, 'tenantId' | 'workspaceId' | 'leadId'> & {
   readonly hadAttachments: boolean;
 };
 
@@ -98,13 +98,14 @@ export class GraphMessageNormalizer {
 /** Attaches correlation-derived identity fields once known, producing the final canonical event. */
 export function toCanonicalReplyIngressEvent(
   normalized: GraphNormalizedReply,
-  correlation: { tenantId: string; leadId: LeadId; campaignId?: string; sequenceId?: string; executionId?: string },
+  correlation: { tenantId: string; workspaceId: string; leadId: LeadId; campaignId?: string; sequenceId?: string; executionId?: string },
 ): ReplyIngressEvent {
   const { hadAttachments, ...rest } = normalized;
   void hadAttachments;
   return {
     ...rest,
     tenantId: correlation.tenantId,
+    workspaceId: correlation.workspaceId,
     leadId: correlation.leadId,
     campaignId: correlation.campaignId,
     sequenceId: correlation.sequenceId,

@@ -1,9 +1,9 @@
-import type { OutreachPlan, OutreachSequence, ResearchEvidence, TenantContext } from '@projectx/domain';
+import type { OutreachPlan, OutreachSequence, ResearchEvidence } from '@projectx/domain';
 import type { Lead } from '@projectx/domain';
 import type { IWorkflowClient } from '@projectx/infrastructure';
 import { WorkflowIdFactory } from '@projectx/shared';
 import type { CorrelationId, EventId, OutreachExecutionId, SequenceId } from '@projectx/shared';
-import type { ISequenceRepository } from '../ports/outreach-repository.interface';
+import type { ISequenceRepository, OutreachRepositoryContext } from '../ports/outreach-repository.interface';
 
 export interface OutreachSequenceStartInput {
   plan: OutreachPlan;
@@ -46,7 +46,7 @@ export class OutreachSequenceLifecycleService {
   constructor(private readonly deps: OutreachSequenceLifecycleDependencies) {}
 
   async startWorkflow(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     sequence: OutreachSequence,
     startInput: OutreachSequenceStartInput,
   ): Promise<OutreachSequenceWorkflowStartResult> {
@@ -57,6 +57,7 @@ export class OutreachSequenceLifecycleService {
       'OutreachSequenceWorkflow',
       {
         tenantId: ctx.tenantId,
+        workspaceId: sequence.workspaceId,
         correlationId: ctx.correlationId,
         sequenceId: sequence.id,
         plan: startInput.plan,
@@ -91,7 +92,7 @@ export class OutreachSequenceLifecycleService {
   }
 
   async loadAndStartWorkflow(
-    ctx: TenantContext,
+    ctx: OutreachRepositoryContext,
     sequenceId: SequenceId,
     startInput: OutreachSequenceStartInput,
   ): Promise<OutreachSequenceWorkflowStartResult | null> {
