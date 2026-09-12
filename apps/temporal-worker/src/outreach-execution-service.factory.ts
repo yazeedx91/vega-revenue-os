@@ -14,7 +14,7 @@ import {
 } from '@projectx/conversation';
 import { ApprovalVerificationAdapter, InMemoryApprovalRepository, PostgresApprovalRepository } from '@projectx/mission-orchestrator';
 import { HistoricalRecipientFingerprint, OutboundRecipientRecovery } from '@projectx/application';
-import type { IOutputValidator, IReasoningEngine, OutputValidationResult, ReasoningOutput } from '@projectx/ai-runtime';
+import type { IOutputValidator, IReasoningEngine } from '@projectx/ai-runtime';
 import {
   AzureKeyVaultSecretsProvider,
   ConsoleTelemetry,
@@ -58,29 +58,6 @@ import {
   StubEmailProvider,
 } from '@projectx/outreach';
 import { asEventId, asIdempotencyKey, asOutreachMessageId } from '@projectx/shared';
-
-const stubReasoningEngine: IReasoningEngine = {
-  async reason(): Promise<ReasoningOutput> {
-    return {
-      rationale: 'stub',
-      conclusion: JSON.stringify({
-        subject: 'Hello',
-        body: 'This is a stub outreach message.',
-        cta: 'Reply',
-        tone: 'professional',
-        claims: [],
-      }),
-      confidence: 0.9,
-      evidence: [],
-    };
-  },
-};
-
-const stubOutputValidator: IOutputValidator = {
-  async validate(): Promise<OutputValidationResult> {
-    return { valid: true, safeOutput: 'This is a stub outreach message.', piiCheck: 'PASSED' };
-  },
-};
 
 export function createTelemetry(): ITelemetry {
   const mode = process.env.TELEMETRY_MODE ?? 'console';
@@ -191,7 +168,11 @@ export function createConversationHandlingService(adapters: DurableAdapters) {
   });
 }
 
-export async function createOutreachExecutionService(adapters: DurableAdapters, telemetry: ITelemetry) {
+export async function createOutreachExecutionService(
+  adapters: DurableAdapters,
+  telemetry: ITelemetry,
+  personalization: { reasoningEngine: IReasoningEngine; outputValidator: IOutputValidator },
+) {
   const config = loadControlledCommunicationConfig();
   const useDurable = adapters.pool !== undefined;
 
@@ -298,8 +279,8 @@ export async function createOutreachExecutionService(adapters: DurableAdapters, 
   }
 
   const personalizationService = new OutreachPersonalizationService({
-    reasoningEngine: stubReasoningEngine,
-    outputValidator: stubOutputValidator,
+    reasoningEngine: personalization.reasoningEngine,
+    outputValidator: personalization.outputValidator,
     generateMessageId: () => asOutreachMessageId(randomUUID()),
     generateExecutionId: () => `exec-${Date.now()}`,
     generateIdempotencyKey: (hint) => asIdempotencyKey(`idmp-${hint}-${Date.now()}`),

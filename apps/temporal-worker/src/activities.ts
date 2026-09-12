@@ -23,6 +23,7 @@ import type { IWorkflowClient, WorkflowExecutionRef, WorkflowStartOptions, Workf
 import { NoOpTelemetry, PostgresAuditLog, PostgresClient } from '@projectx/infrastructure';
 import { Pool } from 'pg';
 import { randomUUID } from 'crypto';
+import { RegexPIIScrubber } from '@projectx/conversation';
 import type { CorrelationId, TenantId, ToolCallRequest, ToolCallResult } from '@projectx/shared';
 import { SpecialistImplementationRegistry } from '@projectx/specialist-agents';
 import { asCorrelationId, asEventId, asIdempotencyKey } from '@projectx/shared';
@@ -30,8 +31,8 @@ import {
   AgentExecutor,
   ContextAssembler,
   InMemoryCheckpointStore,
-  InMemoryMemoryRetriever,
-  InMemoryKnowledgeRetriever,
+  DurableMemoryRetriever,
+  DurableKnowledgeRetriever,
   PolicyAwareDecisionEngine,
   ToolExecutor,
   StructuredOutputValidator,
@@ -40,10 +41,6 @@ import {
   PostgresInvocationAccounting,
   PostgresMemoryRepository,
   PostgresKnowledgeRepository,
-  PostgresEmbeddingProfileCatalog,
-  DeterministicEmbeddingProvider,
-  EmbeddingRouter,
-  EmbeddingProviderRegistry,
   MemoryWritePolicyService,
   KnowledgeIngestionService,
   TrustedWorkspaceAuthorizer,
@@ -54,6 +51,7 @@ import {
   type ISecretDetector,
   type IWorkspaceMembership,
 } from '@projectx/ai-runtime';
+import { getEmbeddingRouter, setPostgresClient } from './embedding-runtime';
 import {
   setKnowledgeIngestionService,
   setMemoryWritePolicy,
@@ -219,7 +217,7 @@ const controlPlanePolicyClient = new ControlPlanePolicyClient({
   policyEvaluationService,
 });
 
-const productionReasoningEngine = new ProductionReasoningEngine({
+export const productionReasoningEngine = new ProductionReasoningEngine({
   llmRouter,
   artifactRepository: reasoningArtifactRepository,
 });
@@ -242,24 +240,44 @@ const governedToolGateway = buildGovernedToolGateway({
   },
 });
 
+setPostgresClient(postgresClient);
+
+const runtimeMemoryRepository = new PostgresMemoryRepository(postgresClient);
+const runtimeKnowledgeRepository = new PostgresKnowledgeRepository(postgresClient);
+const embeddingRouter = getEmbeddingRouter();
+const runtimeMembership: IWorkspaceMembership = {
+  async isMember(workspaceId, tenantId, userId) {
+    const result = await postgresClient.withTenant({ tenantId: tenantId as TenantId, workspaceId, userId, correlationId: 'worker-membership-check' }, (client) => client.query(
+      'SELECT 1 FROM identity.memberships WHERE tenant_id=$1 AND workspace_id=$2 AND user_id=$3::UUID',
+      [tenantId, workspaceId, userId],
+    ));
+    return result.rowCount === 1;
+  },
+};
+const runtimeAuthorizer = new TrustedWorkspaceAuthorizer(runtimeMembership);
+const durableMemoryRetriever = new DurableMemoryRetriever(runtimeMemoryRepository, embeddingRouter, runtimeAuthorizer);
+const durableKnowledgeRetriever = new DurableKnowledgeRetriever(runtimeKnowledgeRepository, embeddingRouter);
+
+export const productionOutputValidator = new StructuredOutputValidator({
+  requiredFields: [],
+  forbiddenValues: [],
+  allowedActions: [],
+  piiPatterns: [],
+});
+
 const agentExecutor = new AgentExecutor({
   agentRegistry: controlPlaneAgentRegistry,
   policyClient: controlPlanePolicyClient,
   contextAssembler: new ContextAssembler({
-    memoryRetriever: new InMemoryMemoryRetriever(),
-    knowledgeRetriever: new InMemoryKnowledgeRetriever(),
+    memoryRetriever: durableMemoryRetriever,
+    knowledgeRetriever: durableKnowledgeRetriever,
   }),
-  memoryRetriever: new InMemoryMemoryRetriever(),
-  knowledgeRetriever: new InMemoryKnowledgeRetriever(),
+  memoryRetriever: durableMemoryRetriever,
+  knowledgeRetriever: durableKnowledgeRetriever,
   reasoningEngine: productionReasoningEngine,
   decisionEngine: new PolicyAwareDecisionEngine(),
   toolClient: new ToolExecutor(governedToolGateway, new NoOpTelemetry()),
-  outputValidator: new StructuredOutputValidator({
-    requiredFields: [],
-    forbiddenValues: [],
-    allowedActions: [],
-    piiPatterns: [],
-  }),
+  outputValidator: productionOutputValidator,
   telemetry: new NoOpTelemetry(),
   checkpointStore: new InMemoryCheckpointStore(),
   implementationRegistry: new SpecialistImplementationRegistry(),
@@ -309,50 +327,27 @@ setActivityEngineContext(engine);
 // Slice 7 — Wire memory-knowledge activities with real Postgres-backed services
 // ---------------------------------------------------------------------------
 const memoryRepo = new PostgresMemoryRepository(postgresClient);
-const knowledgeRepo = new PostgresKnowledgeRepository(postgresClient);
-const embeddingProfileCatalog = new PostgresEmbeddingProfileCatalog(postgresClient);
-
-// Use the deterministic provider for local/offline development. In production
-// with real LLM keys, an OpenAIEmbeddingProvider would also be registered.
-const deterministicProvider = new DeterministicEmbeddingProvider('deterministic', [
-  {
-    modelId: process.env.EMBEDDING_MODEL_ID ?? 'det-model',
-    modelVersion: process.env.EMBEDDING_MODEL_VERSION ?? '1.0',
-    dimensions: Number(process.env.EMBEDDING_DIMENSIONS ?? 64),
-  },
-]);
-const embeddingProviderRegistry = new EmbeddingProviderRegistry();
-embeddingProviderRegistry.register(deterministicProvider);
-const embeddingRouter = new EmbeddingRouter(embeddingProfileCatalog, embeddingProviderRegistry);
-
-const noOpScrubber: IContentScrubber = { scrub: (s: string) => s };
-const noOpSecretDetector: ISecretDetector = {
+const piiScrubber: IContentScrubber = new RegexPIIScrubber();
+const basicSecretDetector: ISecretDetector = {
   containsSecret(input: string): boolean {
     return /sk-[A-Za-z0-9]{20,}/.test(input) || /AKIA[A-Z0-9]{16}/.test(input);
   },
 };
 
-// Workspace membership: in production this would be backed by the identity
-// service. For the Temporal worker we use a permissive stub that allows all
-// memberships, because the ingestion/consolidation activities are invoked by
-// trusted server-side workflows, not directly by end-user requests.
-const permissiveMembership: IWorkspaceMembership = {
-  async isMember() { return true; },
-};
-const wsAuthorizer = new TrustedWorkspaceAuthorizer(permissiveMembership);
+const wsAuthorizer = runtimeAuthorizer;
 
 const memoryWritePolicy = new MemoryWritePolicyService(
-  memoryRepo,
+  runtimeMemoryRepository,
   embeddingRouter,
   wsAuthorizer,
-  noOpScrubber,
-  noOpSecretDetector,
+  piiScrubber,
+  basicSecretDetector,
 );
 const knowledgeIngestionService = new KnowledgeIngestionService(
-  knowledgeRepo,
+  runtimeKnowledgeRepository,
   embeddingRouter,
-  noOpScrubber,
-  noOpSecretDetector,
+  piiScrubber,
+  basicSecretDetector,
 );
 
 setKnowledgeIngestionService(knowledgeIngestionService);

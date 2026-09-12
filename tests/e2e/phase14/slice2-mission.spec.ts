@@ -22,6 +22,8 @@ import {
   asUserId,
 } from '@projectx/shared';
 import { statusQuery } from '../../../apps/temporal-worker/src/workflows/mission-workflow';
+import { validateEmbeddingRuntime } from '../../../apps/temporal-worker/src/embedding-runtime';
+import { buildVectorSpace } from '@projectx/ai-runtime';
 import type { MissionWorkflowStatus } from '@projectx/mission-orchestrator';
 import {
   getAdminDatabaseUrl,
@@ -323,6 +325,23 @@ describe('Slice 2 canonical mission E2E', () => {
 
     await seedControlPlaneFixtures(adminPool!);
 
+    // Seed the single deterministic ACTIVE embedding profile for the worker.
+    const profileId = `profile-slice2-${randomUUID().slice(0, 8)}`;
+    const profileVectorSpace = buildVectorSpace({
+      providerId: 'deterministic',
+      modelId: 'det-model',
+      modelVersion: 'v1',
+      dimensions: 64,
+      distanceMetric: 'cosine',
+    });
+    await adminPool!.query('DELETE FROM embedding.embedding_profiles');
+    await adminPool!.query(
+      `INSERT INTO embedding.embedding_profiles
+        (embedding_profile_id, provider_id, model_id, model_version, dimensions, distance_metric, vector_space, lifecycle, is_active)
+       VALUES ($1,$2,$3,$4,$5,'cosine',$6,'ACTIVE',TRUE)`,
+      [profileId, 'deterministic', 'det-model', 'v1', 64, profileVectorSpace],
+    );
+
     nativeConnection = await NativeConnection.connect({ address });
     clientConnection = await Connection.connect({ address });
     client = new WorkflowClient({ connection: clientConnection });
@@ -391,6 +410,7 @@ describe('Slice 2 canonical mission E2E', () => {
 
     const taskQueue = `mission-slice2-${runId}`;
     const activities = await import('../../../apps/temporal-worker/src/activities');
+    await validateEmbeddingRuntime('deterministic');
 
     const worker = await Worker.create({
       connection: nativeConnection,
@@ -466,6 +486,7 @@ describe('Slice 2 canonical mission E2E', () => {
 
     const taskQueue = `mission-slice2-pause-${runId}`;
     const activities = await import('../../../apps/temporal-worker/src/activities');
+    await validateEmbeddingRuntime('deterministic');
 
     const worker = await Worker.create({
       connection: nativeConnection,
@@ -561,6 +582,7 @@ describe('Slice 2 canonical mission E2E', () => {
 
     const taskQueue = `mission-slice2-replan-${runId}`;
     const activities = await import('../../../apps/temporal-worker/src/activities');
+    await validateEmbeddingRuntime('deterministic');
 
     const worker = await Worker.create({
       connection: nativeConnection,
@@ -628,6 +650,7 @@ describe('Slice 2 canonical mission E2E', () => {
 
     const taskQueue = `mission-slice2-cancel-${runId}`;
     const activities = await import('../../../apps/temporal-worker/src/activities');
+    await validateEmbeddingRuntime('deterministic');
 
     const worker = await Worker.create({
       connection: nativeConnection,
