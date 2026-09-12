@@ -4,6 +4,7 @@ resource "random_pet" "suffix" {
 
 locals {
   base_name = "${var.project_name}-${var.environment}-${random_pet.suffix.id}"
+  is_test   = var.environment == "test"
 }
 
 resource "azurerm_resource_group" "projectx" {

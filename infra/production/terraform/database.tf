@@ -25,9 +25,9 @@ resource "azurerm_postgresql_flexible_server" "projectx" {
   administrator_login    = var.postgresql_admin_user
   administrator_password = random_password.pg_admin.result
   storage_mb             = 32768
-  sku_name               = "B_Standard_B2s"
-  zone                   = "1"
-
+  sku_name               = local.is_test ? "B_Standard_B1ms" : "B_Standard_B2s"
+  backup_retention_days  = 7
+  geo_redundant_backup_enabled = false
   public_network_access_enabled = false
 
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]

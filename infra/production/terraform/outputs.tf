@@ -14,13 +14,13 @@ output "postgresql_fqdn" {
 }
 
 output "redis_hostname" {
-  description = "Redis hostname"
-  value       = azurerm_redis_cache.projectx.hostname
+  description = "Managed Redis hostname"
+  value       = azurerm_managed_redis.projectx.host_name
 }
 
-output "redis_ssl_port" {
-  description = "Redis SSL port"
-  value       = azurerm_redis_cache.projectx.ssl_port
+output "redis_port" {
+  description = "Managed Redis port"
+  value       = 10000
 }
 
 output "application_insights_name" {

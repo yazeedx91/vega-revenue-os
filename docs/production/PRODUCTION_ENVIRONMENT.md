@@ -31,8 +31,8 @@ All values in this document are names and formats. Real credentials, connection 
 
 | Variable | Consuming Service | Class | Purpose | Source | Required | Validation |
 |----------|-------------------|-------|---------|--------|----------|------------|
-| `REDIS_HOST` | API, worker | GENERATED | Redis hostname | `projectx-redis.redis.cache.windows.net` | yes | non-local |
-| `REDIS_PORT` | API, worker | GENERATED | Redis port | `6380` (SSL) | no | positive integer |
+| `REDIS_HOST` | API, worker | GENERATED | Redis hostname | `projectx-redis.uaenorth.redis.azure.net` | yes | non-local |
+| `REDIS_PORT` | API, worker | GENERATED | Redis port | `10000` (SSL) | no | positive integer |
 | `REDIS_PASSWORD` / `REDIS_SSL` | API, worker | SECRET/GENERATED | access token | from Key Vault | yes | not empty |
 
 ## Temporal

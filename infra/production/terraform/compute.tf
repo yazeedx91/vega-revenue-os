@@ -3,7 +3,7 @@ resource "azurerm_log_analytics_workspace" "projectx" {
   location            = var.location
   resource_group_name = azurerm_resource_group.projectx.name
   sku                 = "PerGB2018"
-  retention_in_days   = 30
+  retention_in_days   = 7
 }
 
 resource "azurerm_application_insights" "projectx" {
@@ -12,6 +12,7 @@ resource "azurerm_application_insights" "projectx" {
   resource_group_name = azurerm_resource_group.projectx.name
   workspace_id        = azurerm_log_analytics_workspace.projectx.id
   application_type    = "Node.JS"
+  sampling_percentage = 100
 }
 
 resource "azurerm_container_app_environment" "projectx" {
@@ -42,21 +43,12 @@ resource "azurerm_container_app" "api" {
     }
   }
 
-  dynamic "custom_domain" {
-    for_each = var.domain_name != "" ? [var.domain_name] : []
-    content {
-      certificate_binding_type = "SniEnabled"
-      certificate_id           = null
-      dns_suffix               = custom_domain.value
-    }
-  }
-
   template {
     container {
       name   = "api"
       image  = var.api_image
-      cpu    = 1.0
-      memory = "2Gi"
+      cpu    = local.is_test ? 0.25 : 1.0
+      memory = local.is_test ? "0.5Gi" : "2Gi"
 
       env {
         name  = "NODE_ENV"
@@ -91,8 +83,8 @@ resource "azurerm_container_app" "api" {
         value = azurerm_application_insights.projectx.connection_string
       }
     }
-    min_replicas = 2
-    max_replicas = 6
+    min_replicas = local.is_test ? 0 : 2
+    max_replicas = local.is_test ? 2 : 6
   }
 
   depends_on = [azurerm_role_assignment.api_keyvault]
@@ -113,8 +105,8 @@ resource "azurerm_container_app" "worker" {
     container {
       name   = "worker"
       image  = var.worker_image
-      cpu    = 1.0
-      memory = "2Gi"
+      cpu    = local.is_test ? 0.25 : 1.0
+      memory = local.is_test ? "0.5Gi" : "2Gi"
 
       env {
         name  = "NODE_ENV"
@@ -149,8 +141,8 @@ resource "azurerm_container_app" "worker" {
         value = azurerm_application_insights.projectx.connection_string
       }
     }
-    min_replicas = 2
-    max_replicas = 6
+    min_replicas = local.is_test ? 0 : 2
+    max_replicas = local.is_test ? 2 : 6
   }
 
   depends_on = [azurerm_role_assignment.worker_keyvault]
