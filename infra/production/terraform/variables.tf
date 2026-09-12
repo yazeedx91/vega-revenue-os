@@ -44,6 +44,19 @@ variable "temporal_address" {
   default     = ""
 }
 
+variable "temporal_namespace" {
+  type        = string
+  description = "Temporal namespace (e.g. quickstart-projectx-test.rpxgu)"
+  default     = ""
+}
+
+variable "temporal_api_key_secret_id" {
+  type        = string
+  description = "Versioned or versionless ID of the Azure Key Vault secret holding TEMPORAL_API_KEY"
+  default     = ""
+  sensitive   = true
+}
+
 variable "vnet_address_space" {
   type        = string
   description = "VNet CIDR"

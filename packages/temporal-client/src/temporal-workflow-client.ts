@@ -11,6 +11,7 @@ import type { CorrelationId } from '@projectx/shared';
 export interface TemporalWorkflowClientConfig {
   readonly address?: string;
   readonly namespace?: string;
+  readonly apiKey?: string;
 }
 
 /**
@@ -30,9 +31,11 @@ export class TemporalWorkflowClient implements IWorkflowClient {
 
   private async getClient(): Promise<Client> {
     if (!this.clientPromise) {
-      this.clientPromise = Connection.connect({ address: this.config.address }).then(
-        (connection) => new Client({ connection, namespace: this.config.namespace }),
-      );
+      const apiKey = this.config.apiKey;
+      this.clientPromise = Connection.connect({
+        address: this.config.address,
+        ...(apiKey ? { apiKey, tls: true } : {}),
+      }).then((connection) => new Client({ connection, namespace: this.config.namespace }));
     }
     return this.clientPromise;
   }

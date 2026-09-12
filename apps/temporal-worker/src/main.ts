@@ -32,6 +32,7 @@ const BASE_TEMPORAL_DELAY_MS = 1_000;
 
 async function connectWithRetry(
   address: string,
+  apiKey: string | undefined,
   state: TemporalConnectionState,
   maxAttempts = Infinity,
   initialDelayMs = BASE_TEMPORAL_DELAY_MS,
@@ -41,7 +42,10 @@ async function connectWithRetry(
   while (true) {
     attempt += 1;
     try {
-      const connection = await NativeConnection.connect({ address });
+      const connection = await NativeConnection.connect({
+        address,
+        ...(apiKey ? { apiKey, tls: true } : {}),
+      });
       state.connected = true;
       return connection;
     } catch (err) {
@@ -202,12 +206,13 @@ async function main(): Promise<void> {
   lifecycle.start();
 
   const address = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
+  const apiKey = process.env.TEMPORAL_API_KEY;
 
   // Keep the process alive and report readiness while reconnecting. If the
   // connection drops at runtime, shut the workers down and reconnect with
   // bounded exponential backoff + jitter.
   while (true) {
-    const connection = await connectWithRetry(address, temporalState);
+    const connection = await connectWithRetry(address, apiKey, temporalState);
     console.log(JSON.stringify({ level: 'info', code: 'TEMPORAL_CONNECTED', address }));
     try {
       await Promise.all([runMissionWorker(connection), runKnowledgeWorker(connection), runOutreachWorker(connection)]);

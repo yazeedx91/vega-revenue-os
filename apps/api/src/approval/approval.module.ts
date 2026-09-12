@@ -56,6 +56,7 @@ class NoOpWorkflowClient implements IWorkflowClient {
           return new TemporalWorkflowClient({
             address: process.env.TEMPORAL_ADDRESS,
             namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
+            apiKey: process.env.TEMPORAL_API_KEY,
           });
         }
         return new NoOpWorkflowClient();

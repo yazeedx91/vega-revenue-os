@@ -69,8 +69,19 @@ resource "azurerm_container_app" "api" {
         value = azurerm_user_assigned_identity.api.client_id
       }
       env {
+        name  = "TEMPORAL_ADDRESS"
+        value = var.temporal_address
+      }
+      env {
         name  = "TEMPORAL_NAMESPACE"
-        value = "projectx"
+        value = var.temporal_namespace
+      }
+      dynamic "env" {
+        for_each = var.temporal_api_key_secret_id != "" ? [1] : []
+        content {
+          name        = "TEMPORAL_API_KEY"
+          secret_name = "temporal-api-key"
+        }
       }
       env {
         name  = "OUTREACH_LIVE_EMAIL_ENABLED"
@@ -87,6 +98,15 @@ resource "azurerm_container_app" "api" {
     }
     min_replicas = local.is_test ? 0 : 2
     max_replicas = local.is_test ? 2 : 6
+  }
+
+  dynamic "secret" {
+    for_each = var.temporal_api_key_secret_id != "" ? [1] : []
+    content {
+      name                = "temporal-api-key"
+      key_vault_secret_id = var.temporal_api_key_secret_id
+      identity            = azurerm_user_assigned_identity.api.id
+    }
   }
 
   depends_on = [azurerm_role_assignment.api_keyvault]
@@ -123,8 +143,19 @@ resource "azurerm_container_app" "worker" {
         value = azurerm_user_assigned_identity.worker.client_id
       }
       env {
+        name  = "TEMPORAL_ADDRESS"
+        value = var.temporal_address
+      }
+      env {
         name  = "TEMPORAL_NAMESPACE"
-        value = "projectx"
+        value = var.temporal_namespace
+      }
+      dynamic "env" {
+        for_each = var.temporal_api_key_secret_id != "" ? [1] : []
+        content {
+          name        = "TEMPORAL_API_KEY"
+          secret_name = "temporal-api-key"
+        }
       }
       env {
         name  = "OUTREACH_WORKER_HEALTH_PORT"
@@ -145,6 +176,15 @@ resource "azurerm_container_app" "worker" {
     }
     min_replicas = 1
     max_replicas = 2
+  }
+
+  dynamic "secret" {
+    for_each = var.temporal_api_key_secret_id != "" ? [1] : []
+    content {
+      name                = "temporal-api-key"
+      key_vault_secret_id = var.temporal_api_key_secret_id
+      identity            = azurerm_user_assigned_identity.worker.id
+    }
   }
 
   # To scale the worker to zero after a test, run:
