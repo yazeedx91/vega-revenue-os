@@ -2,6 +2,8 @@ locals {
   base_name = "projectx-tfstate"
 }
 
+data "azurerm_client_config" "current" {}
+
 resource "azurerm_resource_group" "tfstate" {
   name     = "${local.base_name}-rg"
   location = var.location
@@ -50,5 +52,5 @@ resource "azurerm_storage_container" "tfstate" {
 resource "azurerm_role_assignment" "terraform_blob_contributor" {
   scope                = azurerm_storage_account.tfstate.id
   role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = var.terraform_principal_id
+  principal_id         = data.azurerm_client_config.current.object_id
 }
