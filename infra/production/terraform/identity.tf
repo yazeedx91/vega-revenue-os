@@ -26,7 +26,7 @@ resource "azurerm_container_registry" "projectx" {
   name                = "${var.project_name}${var.environment}${random_pet.suffix.id}"
   location            = var.location
   resource_group_name = azurerm_resource_group.projectx.name
-  sku                 = "Premium"
+  sku                 = local.is_test ? "Basic" : "Premium"
   admin_enabled       = false
 }
 
