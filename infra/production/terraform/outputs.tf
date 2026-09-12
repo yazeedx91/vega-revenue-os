@@ -15,7 +15,7 @@ output "postgresql_fqdn" {
 
 output "redis_hostname" {
   description = "Managed Redis hostname"
-  value       = azurerm_managed_redis.projectx.host_name
+  value       = azurerm_managed_redis.projectx.hostname
 }
 
 output "redis_port" {

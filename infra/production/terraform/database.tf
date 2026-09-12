@@ -18,16 +18,16 @@ resource "random_password" "pg_admin" {
 }
 
 resource "azurerm_postgresql_flexible_server" "projectx" {
-  name                   = "${local.base_name}-pg"
-  resource_group_name    = azurerm_resource_group.projectx.name
-  location               = var.location
-  version                = "16"
-  administrator_login    = var.postgresql_admin_user
-  administrator_password = random_password.pg_admin.result
-  storage_mb             = 32768
-  sku_name               = local.is_test ? "B_Standard_B1ms" : "B_Standard_B2s"
-  backup_retention_days  = 7
-  geo_redundant_backup_enabled = false
+  name                          = "${local.base_name}-pg"
+  resource_group_name           = azurerm_resource_group.projectx.name
+  location                      = var.location
+  version                       = "16"
+  administrator_login           = var.postgresql_admin_user
+  administrator_password        = random_password.pg_admin.result
+  storage_mb                    = 32768
+  sku_name                      = local.is_test ? "B_Standard_B1ms" : "B_Standard_B2s"
+  backup_retention_days         = 7
+  geo_redundant_backup_enabled  = false
   public_network_access_enabled = false
 
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]

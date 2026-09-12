@@ -38,3 +38,10 @@ audit-findings.json
 .phase14-8-real-send-state.json
 phase14-prepare-error.txt
 plans/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
