@@ -1,0 +1,119 @@
+name: ProjectX Production Deploy
+
+on:
+  push:
+    branches:
+      - product/full-projectx-completion
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git ref or tag to deploy'
+        required: true
+        default: 'projectx-internal-complete-2026-09-12'
+
+env:
+  NODE_VERSION: '20'
+  PNPM_VERSION: '9'
+  TF_DIR: 'infra/production/terraform'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
+      - run: pnpm -r build
+      - run: pnpm test
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push images
+        run: |
+          ACR_NAME=$(az acr list -g ${{ secrets.AZURE_RESOURCE_GROUP }} --query '[0].name' -o tsv)
+          az acr build -t $ACR_NAME.azurecr.io/projectx/api:${{ github.sha }} -r $ACR_NAME -f apps/api/Dockerfile apps/api
+          az acr build -t $ACR_NAME.azurecr.io/projectx/worker:${{ github.sha }} -r $ACR_NAME -f apps/temporal-worker/Dockerfile apps/temporal-worker
+
+  terraform:
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/terraform-github-actions/setup@v3
+
+      - working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init
+          terraform plan -var="api_image=${{ vars.ACR_LOGIN_SERVER }}/projectx/api:${{ github.sha }}" \
+            -var="worker_image=${{ vars.ACR_LOGIN_SERVER }}/projectx/worker:${{ github.sha }}" \
+            -var="location=${{ vars.AZURE_LOCATION }}" \
+            -var="domain_name=${{ vars.PRODUCTION_DOMAIN }}" \
+            -out=tfplan
+          terraform apply tfplan
+
+      - name: Update Container App secrets from Key Vault
+        run: |
+          az containerapp secret set -n ${{ vars.API_CONTAINER_APP_NAME }} -g ${{ vars.AZURE_RESOURCE_GROUP }} --secrets \
+            database-url=keyvaultref:${{ vars.KEY_VAULT_URI }}/secrets/database-url,identityref=${{ vars.API_IDENTITY_ID }}
+
+  migrate:
+    runs-on: ubuntu-latest
+    needs: terraform
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch DATABASE_URL from Key Vault
+        run: |
+          echo "DATABASE_URL=$(az keyvault secret show -n database-url --vault-name ${{ vars.KEY_VAULT_NAME }} --query value -o tsv)" >> $GITHUB_ENV
+
+      - name: Run migrations
+        env:
+          PRODUCTION_MIGRATION_TARGET_APPROVED: 'true'
+        run: ./scripts/production/bootstrap-migrations.sh
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: migrate
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke test
+        env:
+          API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          REDIS_HOST: ${{ vars.REDIS_HOST }}
+        run: ./scripts/production/smoke-test.sh
