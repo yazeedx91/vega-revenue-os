@@ -26,6 +26,7 @@ resource "azurerm_container_app_environment" "projectx" {
 }
 
 resource "azurerm_container_app" "api" {
+  count                        = var.enable_application_runtime ? 1 : 0
   name                         = "${local.base_name}-api"
   container_app_environment_id = azurerm_container_app_environment.projectx.id
   resource_group_name          = azurerm_resource_group.projectx.name
@@ -129,6 +130,7 @@ resource "azurerm_container_app" "api" {
 }
 
 resource "azurerm_container_app" "worker" {
+  count                        = var.enable_application_runtime ? 1 : 0
   name                         = "${local.base_name}-wrk"
   container_app_environment_id = azurerm_container_app_environment.projectx.id
   resource_group_name          = azurerm_resource_group.projectx.name

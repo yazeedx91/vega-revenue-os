@@ -1,6 +1,6 @@
 output "api_fqdn" {
   description = "API Container App FQDN"
-  value       = azurerm_container_app.api.ingress[0].fqdn
+  value       = var.enable_application_runtime ? azurerm_container_app.api[0].ingress[0].fqdn : null
 }
 
 output "key_vault_uri" {

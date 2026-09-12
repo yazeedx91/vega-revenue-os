@@ -25,11 +25,23 @@ variable "domain_name" {
 variable "api_image" {
   type        = string
   description = "API container image (set by CI/CD)"
+  default     = ""
+
+  validation {
+    condition     = !var.enable_application_runtime || var.api_image != ""
+    error_message = "api_image is required when enable_application_runtime is true"
+  }
 }
 
 variable "worker_image" {
   type        = string
   description = "Temporal worker container image (set by CI/CD)"
+  default     = ""
+
+  validation {
+    condition     = !var.enable_application_runtime || var.worker_image != ""
+    error_message = "worker_image is required when enable_application_runtime is true"
+  }
 }
 
 variable "postgresql_admin_user" {
@@ -67,6 +79,17 @@ variable "enable_migration_bootstrap" {
   type        = bool
   description = "If true, create the one-shot migration Container App Job and identity. Set to false after bootstrap."
   default     = false
+}
+
+variable "enable_application_runtime" {
+  type        = bool
+  description = "If true, create the API and worker Container Apps. Only valid after database-url is available."
+  default     = false
+
+  validation {
+    condition     = !var.enable_application_runtime || (var.database_url_secret_id != "" && !var.enable_migration_bootstrap)
+    error_message = "enable_application_runtime requires a non-empty database_url_secret_id and enable_migration_bootstrap must be false"
+  }
 }
 
 variable "migration_image" {

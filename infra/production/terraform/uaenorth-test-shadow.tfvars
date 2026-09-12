@@ -9,5 +9,6 @@ domain_name                = ""
 temporal_address           = "quickstart-projectx-test.rpxgu.tmprl.cloud:7233"
 temporal_namespace         = "quickstart-projectx-test.rpxgu"
 enable_migration_bootstrap = false
+enable_application_runtime = false
 # temporal_api_key_secret_id must be supplied at apply time via the existing Key Vault secret reference.
 # database_url_secret_id must be supplied at final apply time after the migration job creates the database-url secret.

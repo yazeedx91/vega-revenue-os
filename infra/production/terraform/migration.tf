@@ -17,6 +17,9 @@ resource "azurerm_role_assignment" "migration_acr_pull" {
 resource "azurerm_role_assignment" "migration_keyvault" {
   count = var.enable_migration_bootstrap ? 1 : 0
 
+  # Key Vault Secrets Officer is the narrowest built-in role that allows the
+  # bootstrap to both create the database-url secret (which does not yet exist)
+  # and later write a new version to it. The identity is removed after bootstrap.
   scope                = azurerm_key_vault.projectx.id
   role_definition_name = "Key Vault Secrets Officer"
   principal_id         = azurerm_user_assigned_identity.migration[0].principal_id
