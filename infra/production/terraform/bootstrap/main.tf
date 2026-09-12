@@ -1,5 +1,6 @@
 locals {
-  base_name = "projectx-tfstate"
+  base_name            = "projectx-tfstate"
+  storage_account_base = "projectxtfstate"
 }
 
 data "azurerm_client_config" "current" {}
@@ -16,7 +17,7 @@ resource "random_string" "sa_suffix" {
 }
 
 resource "azurerm_storage_account" "tfstate" {
-  name                            = "${local.base_name}${random_string.sa_suffix.result}"
+  name                            = "${local.storage_account_base}${random_string.sa_suffix.result}"
   resource_group_name             = azurerm_resource_group.tfstate.name
   location                        = var.location
   account_tier                    = "Standard"

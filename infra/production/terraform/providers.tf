@@ -14,7 +14,7 @@ terraform {
 
   backend "azurerm" {
     resource_group_name  = "projectx-tfstate-rg"
-    storage_account_name = "SET_AFTER_BOOTSTRAP"
+    storage_account_name = "projectxtfstate9zrvw3sr"
     container_name       = "tfstate"
     key                  = "projectx-test-shadow.tfstate"
     use_azuread_auth     = true
