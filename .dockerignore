@@ -1,0 +1,62 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+.pnpm-store/
+package-lock.json
+yarn.lock
+
+# Build outputs
+**/dist/
+**/*.tsbuildinfo
+
+# Documentation and project files not needed at runtime
+*.md
+docs/
+infra/
+tests/
+scripts/
+.github/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# Test artifacts
+coverage/
+**/__tests__/
+**/*.spec.ts
+**/*.test.ts
+
+# Docker packaging itself
+Dockerfile*
+.dockerignore
+
+# Local generated files
+*.tsbuildinfo
+*.d.ts.map
+*.js.map

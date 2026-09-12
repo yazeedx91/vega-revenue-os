@@ -2,10 +2,10 @@ packages:
   - 'apps/*'
   - 'packages/*'
 allowBuilds:
-  '@nestjs/core': set this to true or false
-  '@swc/core': set this to true or false
-  esbuild: set this to true or false
-  protobufjs: set this to true or false
+  '@nestjs/core': true
+  '@swc/core': true
+  esbuild: true
+  protobufjs: true
   snyk: true
 overrides:
   '@nestjs/core@<=11.1.17': ^11.1.18
