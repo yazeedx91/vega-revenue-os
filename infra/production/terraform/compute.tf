@@ -68,6 +68,13 @@ resource "azurerm_container_app" "api" {
         name  = "AZURE_CLIENT_ID"
         value = azurerm_user_assigned_identity.api.client_id
       }
+      dynamic "env" {
+        for_each = var.database_url_secret_id != "" ? [1] : []
+        content {
+          name        = "DATABASE_URL"
+          secret_name = "database-url"
+        }
+      }
       env {
         name  = "TEMPORAL_ADDRESS"
         value = var.temporal_address
@@ -109,6 +116,15 @@ resource "azurerm_container_app" "api" {
     }
   }
 
+  dynamic "secret" {
+    for_each = var.database_url_secret_id != "" ? [1] : []
+    content {
+      name                = "database-url"
+      key_vault_secret_id = var.database_url_secret_id
+      identity            = azurerm_user_assigned_identity.api.id
+    }
+  }
+
   depends_on = [azurerm_role_assignment.api_keyvault]
 }
 
@@ -141,6 +157,13 @@ resource "azurerm_container_app" "worker" {
       env {
         name  = "AZURE_CLIENT_ID"
         value = azurerm_user_assigned_identity.worker.client_id
+      }
+      dynamic "env" {
+        for_each = var.database_url_secret_id != "" ? [1] : []
+        content {
+          name        = "DATABASE_URL"
+          secret_name = "database-url"
+        }
       }
       env {
         name  = "TEMPORAL_ADDRESS"
@@ -183,6 +206,15 @@ resource "azurerm_container_app" "worker" {
     content {
       name                = "temporal-api-key"
       key_vault_secret_id = var.temporal_api_key_secret_id
+      identity            = azurerm_user_assigned_identity.worker.id
+    }
+  }
+
+  dynamic "secret" {
+    for_each = var.database_url_secret_id != "" ? [1] : []
+    content {
+      name                = "database-url"
+      key_vault_secret_id = var.database_url_secret_id
       identity            = azurerm_user_assigned_identity.worker.id
     }
   }

@@ -1,9 +1,6 @@
 name: ProjectX Production Deploy
 
 on:
-  push:
-    branches:
-      - product/full-projectx-completion
   workflow_dispatch:
     inputs:
       tag:
@@ -21,8 +18,17 @@ permissions:
   contents: read
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "This workflow is disabled pending the VNet-local migration bootstrap integration." >&2
+          echo "See docs/production/MIGRATION_RUNBOOK.md for the approved staged deployment sequence." >&2
+          exit 1
+
   build:
     runs-on: ubuntu-latest
+    needs: guard
     environment: production
     steps:
       - uses: actions/checkout@v4

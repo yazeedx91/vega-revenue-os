@@ -62,3 +62,21 @@ variable "vnet_address_space" {
   description = "VNet CIDR"
   default     = "10.0.0.0/16"
 }
+
+variable "enable_migration_bootstrap" {
+  type        = bool
+  description = "If true, create the one-shot migration Container App Job and identity. Set to false after bootstrap."
+  default     = false
+}
+
+variable "migration_image" {
+  type        = string
+  description = "Migration bootstrap container image (set by CI/CD)"
+  default     = ""
+}
+
+variable "database_url_secret_id" {
+  type        = string
+  description = "Versionless ID of the Azure Key Vault secret holding the runtime DATABASE_URL"
+  default     = ""
+}

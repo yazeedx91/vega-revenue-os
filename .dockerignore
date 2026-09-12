@@ -36,6 +36,7 @@ yarn.lock
 *.md
 docs/
 infra/
+!infra/database/migrations/*.sql
 tests/
 scripts/
 .github/
