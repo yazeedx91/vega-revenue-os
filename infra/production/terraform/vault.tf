@@ -11,7 +11,7 @@ resource "azurerm_private_dns_zone_virtual_network_link" "vault" {
 }
 
 resource "azurerm_key_vault" "projectx" {
-  name                          = "${var.project_name}-${var.environment}-${random_pet.suffix.id}"
+  name                          = "${var.project_name}${var.environment}${replace(random_pet.suffix.id, "-", "")}"
   location                      = var.location
   resource_group_name           = azurerm_resource_group.projectx.name
   tenant_id                     = data.azurerm_client_config.current.tenant_id

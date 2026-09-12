@@ -93,7 +93,7 @@ resource "azurerm_container_app" "api" {
 }
 
 resource "azurerm_container_app" "worker" {
-  name                         = "${local.base_name}-worker"
+  name                         = "${local.base_name}-wrk"
   container_app_environment_id = azurerm_container_app_environment.projectx.id
   resource_group_name          = azurerm_resource_group.projectx.name
   revision_mode                = "Single"
