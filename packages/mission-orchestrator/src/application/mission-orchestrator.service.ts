@@ -59,6 +59,8 @@ export class MissionOrchestratorService {
       workflowType,
       {
         tenantId: ctx.tenantId,
+        workspaceId: mission.workspaceId!,
+        userId: ctx.userId ?? String(mission.ownerUserId),
         missionId: cmd.missionId,
         correlationId,
       },

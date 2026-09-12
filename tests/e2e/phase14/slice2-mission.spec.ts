@@ -22,6 +22,8 @@ import {
   asUserId,
 } from '@projectx/shared';
 import { statusQuery } from '../../../apps/temporal-worker/src/workflows/mission-workflow';
+import { validateEmbeddingRuntime } from '../../../apps/temporal-worker/src/embedding-runtime';
+import { buildVectorSpace } from '@projectx/ai-runtime';
 import type { MissionWorkflowStatus } from '@projectx/mission-orchestrator';
 import {
   getAdminDatabaseUrl,
@@ -274,6 +276,12 @@ describe('Slice 2 canonical mission E2E', () => {
     );
   }
 
+  async function seedWorkspace(tenantId: string, workspaceId: string, userId: string): Promise<void> {
+    await adminPool!.query('INSERT INTO identity.users(id,email,tenant_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING', [userId, `${userId}@example.test`, tenantId]);
+    await adminPool!.query('INSERT INTO identity.workspaces(id,tenant_id,name,owner_user_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING', [workspaceId, tenantId, 'Slice 2', userId]);
+    await adminPool!.query("INSERT INTO identity.memberships(workspace_id,tenant_id,user_id,role) VALUES($1,$2,$3,'OPERATOR') ON CONFLICT DO NOTHING", [workspaceId, tenantId, userId]);
+  }
+
   async function cleanupControlPlaneFixtures(adminPool: Pool): Promise<void> {
     if (controlPlaneSeeds.agent) {
       await adminPool.query(
@@ -317,6 +325,23 @@ describe('Slice 2 canonical mission E2E', () => {
 
     await seedControlPlaneFixtures(adminPool!);
 
+    // Seed the single deterministic ACTIVE embedding profile for the worker.
+    const profileId = `profile-slice2-${randomUUID().slice(0, 8)}`;
+    const profileVectorSpace = buildVectorSpace({
+      providerId: 'deterministic',
+      modelId: 'det-model',
+      modelVersion: 'v1',
+      dimensions: 64,
+      distanceMetric: 'cosine',
+    });
+    await adminPool!.query('DELETE FROM embedding.embedding_profiles');
+    await adminPool!.query(
+      `INSERT INTO embedding.embedding_profiles
+        (embedding_profile_id, provider_id, model_id, model_version, dimensions, distance_metric, vector_space, lifecycle, is_active)
+       VALUES ($1,$2,$3,$4,$5,'cosine',$6,'ACTIVE',TRUE)`,
+      [profileId, 'deterministic', 'det-model', 'v1', 64, profileVectorSpace],
+    );
+
     nativeConnection = await NativeConnection.connect({ address });
     clientConnection = await Connection.connect({ address });
     client = new WorkflowClient({ connection: clientConnection });
@@ -346,8 +371,11 @@ describe('Slice 2 canonical mission E2E', () => {
     const missionId = asMissionId(randomUUID());
     const correlationId = asCorrelationId(`corr-slice2-${runId}`);
     const operatorId = asUserId(randomUUID());
+    const workspaceId = randomUUID();
+    await seedWorkspace(tenantId, workspaceId, operatorId);
     const ctx = {
       tenantId,
+      workspaceId,
       actor: Actor.human(operatorId, tenantId),
       correlationId,
     };
@@ -382,6 +410,7 @@ describe('Slice 2 canonical mission E2E', () => {
 
     const taskQueue = `mission-slice2-${runId}`;
     const activities = await import('../../../apps/temporal-worker/src/activities');
+    await validateEmbeddingRuntime('deterministic');
 
     const worker = await Worker.create({
       connection: nativeConnection,
@@ -433,8 +462,11 @@ describe('Slice 2 canonical mission E2E', () => {
     const missionId = asMissionId(randomUUID());
     const correlationId = asCorrelationId(`corr-slice2-pause-${runId}`);
     const operatorId = asUserId(randomUUID());
+    const workspaceId = randomUUID();
+    await seedWorkspace(tenantId, workspaceId, operatorId);
     const ctx = {
       tenantId,
+      workspaceId,
       actor: Actor.human(operatorId, tenantId),
       correlationId,
     };
@@ -454,6 +486,7 @@ describe('Slice 2 canonical mission E2E', () => {
 
     const taskQueue = `mission-slice2-pause-${runId}`;
     const activities = await import('../../../apps/temporal-worker/src/activities');
+    await validateEmbeddingRuntime('deterministic');
 
     const worker = await Worker.create({
       connection: nativeConnection,
@@ -525,8 +558,11 @@ describe('Slice 2 canonical mission E2E', () => {
     const missionId = asMissionId(randomUUID());
     const correlationId = asCorrelationId(`corr-slice2-replan-${runId}`);
     const operatorId = asUserId(randomUUID());
+    const workspaceId = randomUUID();
+    await seedWorkspace(tenantId, workspaceId, operatorId);
     const ctx = {
       tenantId,
+      workspaceId,
       actor: Actor.human(operatorId, tenantId),
       correlationId,
     };
@@ -546,6 +582,7 @@ describe('Slice 2 canonical mission E2E', () => {
 
     const taskQueue = `mission-slice2-replan-${runId}`;
     const activities = await import('../../../apps/temporal-worker/src/activities');
+    await validateEmbeddingRuntime('deterministic');
 
     const worker = await Worker.create({
       connection: nativeConnection,
@@ -589,8 +626,11 @@ describe('Slice 2 canonical mission E2E', () => {
     const missionId = asMissionId(randomUUID());
     const correlationId = asCorrelationId(`corr-slice2-cancel-${runId}`);
     const operatorId = asUserId(randomUUID());
+    const workspaceId = randomUUID();
+    await seedWorkspace(tenantId, workspaceId, operatorId);
     const ctx = {
       tenantId,
+      workspaceId,
       actor: Actor.human(operatorId, tenantId),
       correlationId,
     };
@@ -610,12 +650,13 @@ describe('Slice 2 canonical mission E2E', () => {
 
     const taskQueue = `mission-slice2-cancel-${runId}`;
     const activities = await import('../../../apps/temporal-worker/src/activities');
+    await validateEmbeddingRuntime('deterministic');
 
     const worker = await Worker.create({
       connection: nativeConnection,
       taskQueue,
       workflowsPath: require.resolve('../../../apps/temporal-worker/src/workflows/mission-workflow'),
-      activities,
+      activities: { ...activities, executeMissionStepActivity: async () => ({ missionId: missionId as string, status: 'EXECUTING' }) },
     });
     const workerRun = worker.run().catch(() => {});
 

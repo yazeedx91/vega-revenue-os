@@ -1293,7 +1293,7 @@ describe('A36/A37: Temporal knowledge ingestion workflows', () => {
   }, 60_000);
 
   afterAll(async () => {
-    temporalWorker?.shutdown();
+    await temporalWorker?.shutdown();
     if (temporalWorkerRun) await temporalWorkerRun;
     await temporalConnection?.close();
     delete (globalThis as any).__a36FailMode;

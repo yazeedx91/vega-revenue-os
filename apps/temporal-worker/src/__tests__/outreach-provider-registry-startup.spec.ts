@@ -83,6 +83,10 @@ describe('Outreach provider registry startup (integration)', () => {
     const { executionService, providerRegistry } = await createOutreachExecutionService(
       adapters,
       { emit: () => {}, recordException: () => {}, startSpan: () => ({ end: () => {} }) as any } as any,
+      {
+        reasoningEngine: { reason: async () => ({ rationale: 'test', conclusion: '{}', confidence: 1, evidence: [] }) },
+        outputValidator: { validate: async () => ({ valid: true, safeOutput: '', piiCheck: 'PASSED' }) },
+      },
     );
 
     expect(providerRegistry.getProviderCount()).toBeGreaterThanOrEqual(1);

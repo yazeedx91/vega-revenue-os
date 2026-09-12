@@ -23,6 +23,7 @@ import {
   RedisHealthIndicator,
   SecretReadinessIndicator,
 } from '@projectx/infrastructure';
+import { validateEmbeddingRuntime } from './embedding-runtime';
 import { TemporalConnectionState, TemporalHealthIndicator } from './health/temporal-health';
 
 const DEFAULT_HEALTH_PORT = Number(process.env.OUTREACH_WORKER_HEALTH_PORT ?? 3001);
@@ -120,6 +121,7 @@ async function runOutreachWorker(connection: NativeConnection): Promise<void> {
   const { executionService, executionRepo, suppressionRepository, sequenceRepo } = await createOutreachExecutionService(
     adapters,
     telemetry,
+    { reasoningEngine: activities.productionReasoningEngine, outputValidator: activities.productionOutputValidator },
   );
   assertControlledSendMode(adapters.pool !== undefined);
   setOutreachExecutionService(executionService);
@@ -159,6 +161,11 @@ function createHealthServer(healthProbe: HealthProbe): Server {
 async function main(): Promise<void> {
   const healthProbe = new HealthProbe();
   const adapters = await createDurableAdapters();
+
+  // Validate exactly one ACTIVE embedding profile and a matching real provider
+  // before any worker can accept a mission. Fail closed on mismatch or missing secret.
+  await validateEmbeddingRuntime('production', adapters.secretsProvider);
+
   healthProbe.add(new SecretReadinessIndicator({ name: 'secrets' }));
   if (adapters.pool) {
     healthProbe.add(new PostgresHealthIndicator({ pool: adapters.pool, name: 'postgres' }));

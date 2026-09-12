@@ -12,7 +12,8 @@ import {
   MissionOrchestratorService,
   PostgresMissionRepository,
 } from '@projectx/mission-orchestrator';
-import { PostgresInvocationAccounting } from '@projectx/ai-runtime';
+import { PostgresInvocationAccounting, buildVectorSpace } from '@projectx/ai-runtime';
+import { validateEmbeddingRuntime } from '../../../apps/temporal-worker/src/embedding-runtime';
 import { TemporalWorkflowClient } from '@projectx/temporal-client';
 import { PostgresClient } from '@projectx/infrastructure';
 import {
@@ -325,6 +326,23 @@ describe('Slice 5 Temporal -> LLM E2E (real production chain)', () => {
 
     await seedControlPlane(adminPool);
 
+    // Seed the single deterministic ACTIVE embedding profile for the worker.
+    const profileId = `profile-slice5-${randomUUID().slice(0, 8)}`;
+    const profileVectorSpace = buildVectorSpace({
+      providerId: 'deterministic',
+      modelId: 'det-model',
+      modelVersion: 'v1',
+      dimensions: 64,
+      distanceMetric: 'cosine',
+    });
+    await adminPool!.query('DELETE FROM embedding.embedding_profiles');
+    await adminPool!.query(
+      `INSERT INTO embedding.embedding_profiles
+        (embedding_profile_id, provider_id, model_id, model_version, dimensions, distance_metric, vector_space, lifecycle, is_active)
+       VALUES ($1,$2,$3,$4,$5,'cosine',$6,'ACTIVE',TRUE)`,
+      [profileId, 'deterministic', 'det-model', 'v1', 64, profileVectorSpace],
+    );
+
     nativeConnection = await NativeConnection.connect({ address });
     clientConnection = await Connection.connect({ address });
     client = new WorkflowClient({ connection: clientConnection });
@@ -346,8 +364,13 @@ describe('Slice 5 Temporal -> LLM E2E (real production chain)', () => {
     const missionId = asMissionId(randomUUID());
     const correlationId = asCorrelationId(`corr-slice5-temporal-${runId}`);
     const operatorId = asUserId(randomUUID());
+    const workspaceId = randomUUID();
+    await adminPool.query('INSERT INTO identity.users(id,email,tenant_id) VALUES($1,$2,$3)', [operatorId, `${operatorId}@example.test`, tenantId]);
+    await adminPool.query('INSERT INTO identity.workspaces(id,tenant_id,name,owner_user_id) VALUES($1,$2,$3,$4)', [workspaceId, tenantId, 'Slice 5', operatorId]);
+    await adminPool.query("INSERT INTO identity.memberships(workspace_id,tenant_id,user_id,role) VALUES($1,$2,$3,'OPERATOR')", [workspaceId, tenantId, operatorId]);
     const ctx: CommandContext = {
       tenantId,
+      workspaceId,
       actor: Actor.human(operatorId, tenantId),
       correlationId,
     };
@@ -368,6 +391,7 @@ describe('Slice 5 Temporal -> LLM E2E (real production chain)', () => {
     const taskQueue = `mission-slice5-llm-${runId}`;
     // Import activities AFTER env is set so the real providers target the mock.
     const activities = await import('../../../apps/temporal-worker/src/activities');
+    await validateEmbeddingRuntime('deterministic');
 
     const worker = await Worker.create({
       connection: nativeConnection,

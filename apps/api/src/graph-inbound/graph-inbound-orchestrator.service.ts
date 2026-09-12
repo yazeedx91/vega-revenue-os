@@ -84,7 +84,7 @@ export class GraphInboundOrchestratorService {
     }
 
     const event = ingressOutcome.event;
-    const ctx: TenantContext = { tenantId: asTenantId(event.tenantId), correlationId: `graph-reply-${event.providerMessageId}` };
+    const ctx = { tenantId: asTenantId(event.tenantId), workspaceId: event.workspaceId, correlationId: `graph-reply-${event.providerMessageId}` };
 
     const handleResult = await this.config.conversationService.handleReply(ctx, event);
 

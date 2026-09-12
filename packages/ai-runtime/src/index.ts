@@ -46,6 +46,7 @@ export * from './embedding/embedding-router';
 export * from './embedding/openai-embedding-provider';
 export * from './embedding/deterministic-embedding-provider';
 export * from './embedding/embedding-accounting';
+export * from './embedding/embedding-runtime';
 export * from './execution-state/execution-state';
 export * from './execution-state/checkpoint-store.interface';
 export * from './execution-state/in-memory-checkpoint-store';

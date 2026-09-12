@@ -34,6 +34,7 @@ import {
   createTenantContext,
   requireEnv,
   runMigrations,
+  seedOutreachOwnership,
 } from './helpers';
 import { getAdminDatabaseUrl, getAppDatabaseUrl } from './integration-config';
 
@@ -220,6 +221,7 @@ describe('Phase 14 P0-2 tenant isolation, RLS and secrets', () => {
     const campaign = buildCampaign(tenantA, 'campaign-a');
     const repo = new PostgresCampaignRepository({ pool: appPool });
     const ctxA = createTenantContext(tenantA);
+    await seedOutreachOwnership(adminPool, tenantA, String(campaign.leadId), campaign.contactId, campaign.recipientFingerprint);
     await repo.save(ctxA, campaign);
 
     const ctxB = createTenantContext(tenantB);
@@ -239,8 +241,11 @@ describe('Phase 14 P0-2 tenant isolation, RLS and secrets', () => {
     // Seed a sequence for A directly via admin so we know the PK.
     const campaign = buildCampaign(tenantA, 'campaign-rls');
     const sequence = buildSequence(tenantA, campaign.id, 'seq-rls');
+    const ctxA = createTenantContext(tenantA);
+    await seedOutreachOwnership(adminPool, tenantA, String(sequence.leadId), sequence.contactId, sequence.recipientFingerprint, sequence.recipientCiphertext);
+    await new PostgresCampaignRepository({ pool: appPool }).save(ctxA, campaign);
     const repo = new PostgresSequenceRepository({ pool: appPool });
-    await repo.save(createTenantContext(tenantA), sequence);
+    await repo.save(ctxA, sequence);
 
     // Tenant B cannot see it.
     await appClient.query(`SELECT set_config('app.current_tenant', $1, false)`, [tenantB]);
@@ -268,6 +273,8 @@ describe('Phase 14 P0-2 tenant isolation, RLS and secrets', () => {
       {
         id: 'approval-a' as unknown as ApprovalId,
         tenantId: asTenantId(tenantA),
+        workspaceId: createTenantContext(tenantA).workspaceId,
+        workspaceBindingState: 'WORKSPACE_BOUND',
         missionId: 'mission-a',
         sequenceId: asSequenceId('seq-a'),
         executionId: asOutreachExecutionId('exec-a'),
@@ -287,7 +294,7 @@ describe('Phase 14 P0-2 tenant isolation, RLS and secrets', () => {
     );
     if (!approval.success) throw new Error('Failed to create test approval');
     approval.value.approve(asUserId('e2e-operator'), 'approved', asCorrelationId('corr'), asEventId('evt'));
-    await repo.save(approval.value);
+    await repo.save(createTenantContext(tenantA), approval.value);
 
     const verifyA = new ApprovalVerificationAdapter(repo);
     const resultA = await verifyA.verify(createTenantContext(tenantA), {
@@ -355,6 +362,8 @@ describe('Phase 14 P0-2 tenant isolation, RLS and secrets', () => {
         {
           id: `approval-exec-${Date.now()}` as unknown as ApprovalId,
           tenantId: asTenantId(tenantA),
+          workspaceId: ctxA.workspaceId,
+          workspaceBindingState: 'WORKSPACE_BOUND',
           missionId: `mission-${Date.now()}`,
           sequenceId: sequence.id,
           executionId: draft.executionId,
@@ -374,7 +383,7 @@ describe('Phase 14 P0-2 tenant isolation, RLS and secrets', () => {
       );
       if (!approval.success) throw new Error('Approval creation failed');
       approval.value.approve(asUserId('e2e-operator'), 'approved', asCorrelationId('corr-approve'), asEventId('evt-approve'));
-      await approvalRepo.save(approval.value);
+      await approvalRepo.save(ctxA, approval.value);
 
       const resultA = await service.executeApprovedSend(
         ctxA,
