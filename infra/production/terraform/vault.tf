@@ -18,6 +18,7 @@ resource "azurerm_key_vault" "projectx" {
   sku_name                      = "standard"
   soft_delete_retention_days    = 90
   purge_protection_enabled      = true
+  rbac_authorization_enabled    = true
   public_network_access_enabled = false
 }
 
