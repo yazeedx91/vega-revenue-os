@@ -8,6 +8,23 @@
 
 ---
 
+## 0. Terraform Remote State Bootstrap
+
+This is a one-time, separate operation. Run it from `infra/production/terraform/bootstrap` before the main ProjectX stack.
+
+- [ ] **USER/AZURE ADMIN MUST DO** — Identify the Entra principal that will run Terraform (`terraform_principal_id`).
+- [ ] **DEVIN CAN DO** — Run `terraform -chdir=infra/production/terraform/bootstrap init` then `apply -var="terraform_principal_id=<id>"` to create:
+  - dedicated state resource group
+  - dedicated storage account (TLS 1.2, no shared keys, blob versioning enabled)
+  - private `tfstate` container
+  - `Storage Blob Data Contributor` on the storage account for the Terraform principal
+- [ ] **DEVIN CAN DO** — Record `resource_group_name`, `storage_account_name`, and `container_name` from `terraform output`.
+- [ ] **USER/AZURE ADMIN MUST DO** — Replace `SET_AFTER_BOOTSTRAP` in `infra/production/terraform/providers.tf` with the real storage account name.
+- [ ] **DEVIN CAN DO** — Re-initialize the main stack: `terraform -chdir=infra/production/terraform init -backend-config="storage_account_name=<real-name>"`.
+- [ ] **DEVIN CAN DO** — Verify the main stack now writes state to the azurerm backend, not local `terraform.tfstate`.
+
+---
+
 ## 1. Azure Subscription & Region
 
 - [ ] **USER/AZURE ADMIN MUST DO** — Provide an Azure subscription with budget approval.
@@ -42,8 +59,8 @@
 
 ## 6. Redis
 
-- [ ] **DEVIN CAN DO** — Provision `azurerm_redis_cache` with private endpoint and SSL.
-- [ ] **DEVIN CAN DO** — Store host, port, and key in Key Vault.
+- [ ] **DEVIN CAN DO** — Provision `azurerm_managed_redis` (Azure Managed Redis) with private endpoint and SSL. Use `Balanced_B0` for test/shadow with `high_availability_enabled = false`.
+- [ ] **DEVIN CAN DO** — Store host, port, and access key in Key Vault.
 
 ## 7. Temporal
 
@@ -80,9 +97,17 @@
 
 ## 12. Container Registry & Images
 
-- [ ] **DEVIN CAN DO** — Provision Azure Container Registry.
-- [ ] **DEVIN CAN DO** — Configure the deployment pipeline (`.github/workflows/production-deploy.yml`) to build and push `projectx/api` and `projectx/worker` images.
-- [ ] **USER/AZURE ADMIN MUST DO** — Grant ACR `AcrPull` to API and worker managed identities.
+- [ ] **DEVIN CAN DO** — Provision Azure Container Registry. The test/shadow environment uses Basic SKU with the public endpoint as an explicit cost exception; private endpoints require Premium SKU.
+- [ ] **DEVIN CAN DO** — Confirm `admin_enabled = false` and `AcrPull` is assigned to API and worker managed identities.
+- [ ] **USER/AZURE ADMIN MUST DO** — Build and push real images before the final apply using immutable digest references or unique release tags:
+  1. `docker build -t <acr-name>.azurecr.io/projectx/api:<git-sha> ./apps/api`
+  2. `docker build -t <acr-name>.azurecr.io/projectx/worker:<git-sha> ./apps/temporal-worker`
+  3. `az acr login -n <acr-name>`
+  4. `docker push <acr-name>.azurecr.io/projectx/api:<git-sha>`
+  5. `docker push <acr-name>.azurecr.io/projectx/worker:<git-sha>`
+- [ ] **DEVIN CAN DO** — Run the final `terraform apply -var="api_image=<acr-name>.azurecr.io/projectx/api:<git-sha>" -var="worker_image=<acr-name>.azurecr.io/projectx/worker:<git-sha>"`.
+
+Do not use `placeholder.invalid/projectx-api:plan-only` or `placeholder.invalid/projectx-worker:plan-only` for apply.
 
 ## 13. Deployment
 

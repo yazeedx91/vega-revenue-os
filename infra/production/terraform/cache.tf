@@ -11,11 +11,12 @@ resource "azurerm_private_dns_zone_virtual_network_link" "redis" {
 }
 
 resource "azurerm_managed_redis" "projectx" {
-  name                  = "${local.base_name}-redis"
-  location              = var.location
-  resource_group_name   = azurerm_resource_group.projectx.name
-  sku_name              = local.is_test ? "Balanced_B0" : "Balanced_B3"
-  public_network_access = "Disabled"
+  name                      = "${local.base_name}-redis"
+  location                  = var.location
+  resource_group_name       = azurerm_resource_group.projectx.name
+  sku_name                  = local.is_test ? "Balanced_B0" : "Balanced_B3"
+  public_network_access     = "Disabled"
+  high_availability_enabled = false
 
   default_database {
     access_keys_authentication_enabled = true

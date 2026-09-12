@@ -4,15 +4,17 @@ resource "azurerm_log_analytics_workspace" "projectx" {
   resource_group_name = azurerm_resource_group.projectx.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
+  daily_quota_gb      = 1
 }
 
 resource "azurerm_application_insights" "projectx" {
-  name                = "${local.base_name}-appi"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.projectx.name
-  workspace_id        = azurerm_log_analytics_workspace.projectx.id
-  application_type    = "Node.JS"
-  sampling_percentage = 100
+  name                 = "${local.base_name}-appi"
+  location             = var.location
+  resource_group_name  = azurerm_resource_group.projectx.name
+  workspace_id         = azurerm_log_analytics_workspace.projectx.id
+  application_type     = "Node.JS"
+  daily_data_cap_in_gb = 1
+  sampling_percentage  = 25
 }
 
 resource "azurerm_container_app_environment" "projectx" {
@@ -141,9 +143,12 @@ resource "azurerm_container_app" "worker" {
         value = azurerm_application_insights.projectx.connection_string
       }
     }
-    min_replicas = local.is_test ? 0 : 2
-    max_replicas = local.is_test ? 2 : 6
+    min_replicas = 1
+    max_replicas = 2
   }
+
+  # To scale the worker to zero after a test, run:
+  # az containerapp update -g <resource-group> -n <worker-name> --min-replicas 0 --max-replicas 0
 
   depends_on = [azurerm_role_assignment.worker_keyvault]
 }

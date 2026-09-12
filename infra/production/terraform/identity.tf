@@ -23,6 +23,9 @@ resource "azurerm_role_assignment" "worker_keyvault" {
 }
 
 resource "azurerm_container_registry" "projectx" {
+  # Test/shadow uses Basic ACR with the public endpoint enabled as an explicit cost exception.
+  # Private ACR endpoints require the Premium SKU and are not justified for the $200 test budget.
+  # Admin access is disabled; managed identities are used for pull via AcrPull.
   name                = "${var.project_name}${var.environment}${random_pet.suffix.id}"
   location            = var.location
   resource_group_name = azurerm_resource_group.projectx.name
