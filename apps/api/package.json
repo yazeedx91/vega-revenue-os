@@ -21,6 +21,7 @@
     "@projectx/domain": "workspace:*",
     "@projectx/identity": "workspace:*",
     "@projectx/infrastructure": "workspace:*",
+    "@projectx/intelligence": "workspace:*",
     "@projectx/mission-orchestrator": "workspace:*",
     "@projectx/outreach": "workspace:*",
     "@projectx/shared": "workspace:*",

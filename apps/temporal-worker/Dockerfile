@@ -19,7 +19,7 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm -r build
 
-RUN pnpm --filter @projectx/temporal-worker deploy /prod/worker
+RUN pnpm --filter @projectx/temporal-worker deploy --legacy /prod/worker
 
 FROM node:22-bookworm-slim AS runtime
 ARG GIT_SHA

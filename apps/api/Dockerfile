@@ -19,7 +19,7 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm -r build
 
-RUN pnpm --filter @projectx/api deploy /prod/api
+RUN pnpm --filter @projectx/api deploy --legacy /prod/api
 
 FROM node:22-bookworm-slim AS runtime
 ARG GIT_SHA

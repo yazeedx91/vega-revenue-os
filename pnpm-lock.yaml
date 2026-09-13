@@ -183,6 +183,9 @@ importers:
       '@projectx/infrastructure':
         specifier: workspace:*
         version: link:../../packages/infrastructure
+      '@projectx/intelligence':
+        specifier: workspace:*
+        version: link:../../packages/intelligence
       '@projectx/mission-orchestrator':
         specifier: workspace:*
         version: link:../../packages/mission-orchestrator
