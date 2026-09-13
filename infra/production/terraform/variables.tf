@@ -28,8 +28,8 @@ variable "api_image" {
   default     = ""
 
   validation {
-    condition     = !var.enable_application_runtime || var.api_image != ""
-    error_message = "api_image is required when enable_application_runtime is true"
+    condition     = !var.enable_application_runtime || (var.api_image != "" && can(regex("@sha256:[a-f0-9]{64}$", var.api_image)))
+    error_message = "api_image is required and must be an immutable digest reference (@sha256:<64-hex>) when enable_application_runtime is true"
   }
 }
 
@@ -39,8 +39,8 @@ variable "worker_image" {
   default     = ""
 
   validation {
-    condition     = !var.enable_application_runtime || var.worker_image != ""
-    error_message = "worker_image is required when enable_application_runtime is true"
+    condition     = !var.enable_application_runtime || (var.worker_image != "" && can(regex("@sha256:[a-f0-9]{64}$", var.worker_image)))
+    error_message = "worker_image is required and must be an immutable digest reference (@sha256:<64-hex>) when enable_application_runtime is true"
   }
 }
 
@@ -67,6 +67,11 @@ variable "temporal_api_key_secret_id" {
   description = "Versioned or versionless ID of the Azure Key Vault secret holding TEMPORAL_API_KEY"
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = var.temporal_api_key_secret_id == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.temporal_api_key_secret_id))
+    error_message = "temporal_api_key_secret_id must be a real Key Vault secret id, not a placeholder"
+  }
 }
 
 variable "vnet_address_space" {
@@ -106,12 +111,22 @@ variable "migration_image" {
   type        = string
   description = "Migration bootstrap container image (set by CI/CD)"
   default     = ""
+
+  validation {
+    condition     = !var.enable_migration_bootstrap || (var.migration_image != "" && can(regex("@sha256:[a-f0-9]{64}$", var.migration_image)))
+    error_message = "migration_image is required and must be an immutable digest reference (@sha256:<64-hex>) when enable_migration_bootstrap is true"
+  }
 }
 
 variable "database_url_secret_id" {
   type        = string
   description = "Versionless ID of the Azure Key Vault secret holding the runtime DATABASE_URL"
   default     = ""
+
+  validation {
+    condition     = var.database_url_secret_id == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.database_url_secret_id))
+    error_message = "database_url_secret_id must be a real Key Vault secret id, not a placeholder"
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -121,12 +136,22 @@ variable "graph_tenant_id" {
   type        = string
   description = "Entra tenant id for Microsoft Graph client credential flow"
   default     = ""
+
+  validation {
+    condition     = var.graph_tenant_id == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.graph_tenant_id))
+    error_message = "graph_tenant_id must be a real tenant id, not a placeholder"
+  }
 }
 
 variable "graph_client_id" {
   type        = string
   description = "Entra application (client) id for Microsoft Graph"
   default     = ""
+
+  validation {
+    condition     = var.graph_client_id == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.graph_client_id))
+    error_message = "graph_client_id must be a real application id, not a placeholder"
+  }
 }
 
 variable "graph_client_secret_reference" {
@@ -134,12 +159,22 @@ variable "graph_client_secret_reference" {
   description = "Key Vault secret reference for the Graph application client secret (not the value)"
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = var.graph_client_secret_reference == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.graph_client_secret_reference))
+    error_message = "graph_client_secret_reference must be a real Key Vault secret reference, not a placeholder"
+  }
 }
 
 variable "graph_webhook_callback_url" {
   type        = string
   description = "Allowed notification URL prefix for Graph webhook subscriptions"
   default     = ""
+
+  validation {
+    condition     = var.graph_webhook_callback_url == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.graph_webhook_callback_url))
+    error_message = "graph_webhook_callback_url must be a real URL prefix, not a placeholder"
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -150,12 +185,22 @@ variable "jwt_signing_key_active_reference" {
   description = "Key Vault secret reference for the active JWT HMAC signing key"
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = var.jwt_signing_key_active_reference == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.jwt_signing_key_active_reference))
+    error_message = "jwt_signing_key_active_reference must be a real Key Vault secret reference, not a placeholder"
+  }
 }
 
 variable "jwt_signing_key_active_kid" {
   type        = string
   description = "Key ID (kid) of the active JWT signing key"
   default     = ""
+
+  validation {
+    condition     = var.jwt_signing_key_active_kid == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.jwt_signing_key_active_kid))
+    error_message = "jwt_signing_key_active_kid must be a real key id, not a placeholder"
+  }
 }
 
 variable "jwt_signing_key_previous_reference" {
@@ -163,18 +208,33 @@ variable "jwt_signing_key_previous_reference" {
   description = "Key Vault secret reference for the previous JWT HMAC signing key during rotation"
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = var.jwt_signing_key_previous_reference == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.jwt_signing_key_previous_reference))
+    error_message = "jwt_signing_key_previous_reference must be a real Key Vault secret reference, not a placeholder"
+  }
 }
 
 variable "jwt_signing_key_previous_kid" {
   type        = string
   description = "Key ID (kid) of the previous JWT signing key"
   default     = ""
+
+  validation {
+    condition     = var.jwt_signing_key_previous_kid == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.jwt_signing_key_previous_kid))
+    error_message = "jwt_signing_key_previous_kid must be a real key id, not a placeholder"
+  }
 }
 
 variable "jwt_signing_key_previous_valid_until" {
   type        = string
   description = "ISO-8601 timestamp until which the previous JWT signing key remains valid"
   default     = ""
+
+  validation {
+    condition     = var.jwt_signing_key_previous_valid_until == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.jwt_signing_key_previous_valid_until))
+    error_message = "jwt_signing_key_previous_valid_until must be a real ISO-8601 timestamp, not a placeholder"
+  }
 }
 
 variable "entra_jwks_secret_reference" {
@@ -182,24 +242,47 @@ variable "entra_jwks_secret_reference" {
   description = "Key Vault secret reference for the Entra OIDC JWKS JSON"
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = var.entra_jwks_secret_reference == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.entra_jwks_secret_reference))
+    error_message = "entra_jwks_secret_reference must be a real Key Vault secret reference, not a placeholder"
+  }
 }
 
 variable "entra_issuer" {
   type        = string
   description = "Expected Entra token issuer, e.g. https://login.microsoftonline.com/{tenant}/v2.0"
   default     = ""
+
+  validation {
+    condition = var.entra_issuer == "" || (
+      !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.entra_issuer)) &&
+      can(regex("^https://login\\.microsoftonline\\.com/[^/]+/v2\\.0$", var.entra_issuer))
+    )
+    error_message = "entra_issuer must be a valid Entra v2.0 issuer URL (https://login.microsoftonline.com/{tenant}/v2.0) and not a placeholder"
+  }
 }
 
 variable "entra_client_id" {
   type        = string
   description = "Expected Entra token audience (application client id)"
   default     = ""
+
+  validation {
+    condition     = var.entra_client_id == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.entra_client_id))
+    error_message = "entra_client_id must be a real application id, not a placeholder"
+  }
 }
 
 variable "entra_allowed_tenant_id" {
   type        = string
   description = "Tenant id allowed to authenticate to the API"
   default     = ""
+
+  validation {
+    condition     = var.entra_allowed_tenant_id == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.entra_allowed_tenant_id))
+    error_message = "entra_allowed_tenant_id must be a real tenant id, not a placeholder"
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -210,6 +293,11 @@ variable "admin_api_key_secret_reference" {
   description = "Key Vault secret reference for the operator admin API key"
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = var.admin_api_key_secret_reference == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.admin_api_key_secret_reference))
+    error_message = "admin_api_key_secret_reference must be a real Key Vault secret reference, not a placeholder"
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -219,12 +307,22 @@ variable "openai_embedding_secret_name" {
   type        = string
   description = "Key Vault secret name consumed by the worker embedding runtime"
   default     = "openai/embedding-api-key"
+
+  validation {
+    condition     = !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.openai_embedding_secret_name))
+    error_message = "openai_embedding_secret_name must be a real Key Vault secret name, not a placeholder"
+  }
 }
 
 variable "openai_secret_name" {
   type        = string
   description = "Key Vault secret name consumed by the LLM runtime for OpenAI"
   default     = "openai/api-key"
+
+  validation {
+    condition     = !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.openai_secret_name))
+    error_message = "openai_secret_name must be a real Key Vault secret name, not a placeholder"
+  }
 }
 
 variable "openai_default_model" {
@@ -237,10 +335,20 @@ variable "anthropic_secret_name" {
   type        = string
   description = "Key Vault secret name consumed by the LLM runtime for Anthropic (optional)"
   default     = ""
+
+  validation {
+    condition     = var.anthropic_secret_name == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.anthropic_secret_name))
+    error_message = "anthropic_secret_name must be a real Key Vault secret name, not a placeholder"
+  }
 }
 
 variable "anthropic_default_model" {
   type        = string
   description = "Default Anthropic model id for the LLM runtime (optional)"
   default     = ""
+
+  validation {
+    condition     = var.anthropic_default_model == "" || !can(regex("(?i)(PLAN-ONLY|PLACEHOLDER|CHANGEME|TODO)", var.anthropic_default_model))
+    error_message = "anthropic_default_model must be a real model id, not a placeholder"
+  }
 }

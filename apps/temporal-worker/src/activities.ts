@@ -20,7 +20,13 @@ import {
 } from '@projectx/mission-orchestrator';
 import type { TenantContext } from '@projectx/domain';
 import type { IWorkflowClient, WorkflowExecutionRef, WorkflowStartOptions, WorkflowStartResult } from '@projectx/infrastructure';
-import { NoOpTelemetry, PostgresAuditLog, PostgresClient } from '@projectx/infrastructure';
+import {
+  AzureKeyVaultSecretsProvider,
+  EnvironmentSecretsProvider,
+  NoOpTelemetry,
+  PostgresAuditLog,
+  PostgresClient,
+} from '@projectx/infrastructure';
 import { Pool } from 'pg';
 import { randomUUID } from 'crypto';
 import { RegexPIIScrubber } from '@projectx/conversation';
@@ -73,7 +79,6 @@ import {
   type PostgresControlPlaneRepositoryConfig,
 } from '@projectx/control-plane';
 import { LLMRouter, ProviderRegistry, OpenAIProvider, AnthropicProvider } from '@projectx/llm-gateway';
-import { EnvironmentSecretsProvider } from '@projectx/infrastructure';
 import { buildGovernedToolGateway } from './tool-gateway-wiring';
 import { StubMissionPlanner } from './stubs';
 
@@ -137,7 +142,9 @@ const emergencyStopProvider = new PostgresEmergencyStopProvider(repoConfig);
 
 const modelCatalog = new ControlPlaneModelCatalog(modelRepository);
 
-const secretsProvider = new EnvironmentSecretsProvider();
+const secretsProvider = process.env.AZURE_KEY_VAULT_URL
+  ? new AzureKeyVaultSecretsProvider({ vaultUrl: process.env.AZURE_KEY_VAULT_URL })
+  : new EnvironmentSecretsProvider();
 const providerRegistry = new ProviderRegistry();
 providerRegistry.register(
   new OpenAIProvider({
