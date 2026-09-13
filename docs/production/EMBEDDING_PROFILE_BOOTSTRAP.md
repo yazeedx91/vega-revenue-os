@@ -46,15 +46,21 @@ openai:text-embedding-3-small:2024-01-25:1536:cosine
    - `model_version` (e.g. `2024-01-25`)
    - `dimensions` (e.g. `1536`)
    - `distance_metric` (e.g. `cosine`)
-   - Key Vault secret name consumed by the worker (default `openai/embedding-api-key`, overridable via `OPENAI_EMBEDDING_SECRET_NAME`)
+   - Key Vault secret name consumed by the worker (the worker's default is
+     `openai/api-key`; set `OPENAI_EMBEDDING_SECRET_NAME=openai/embedding-api-key`
+     to override, matching the runtime Terraform default)
 
 2. Deactivate any existing active profile:
 
    ```sql
    UPDATE embedding.embedding_profiles
-   SET lifecycle = 'DEPRECATED', is_active = false
-   WHERE is_active = true;
+   SET lifecycle = 'RETIRED'
+   WHERE lifecycle = 'ACTIVE';
    ```
+
+   Note: `RETIRED` profiles keep their row and vector-space identity for audit
+   purposes. A new profile must use a new `embedding_profile_id` if a retired
+   profile already owns the same vector space.
 
 3. Insert or update the single `ACTIVE` profile:
 
@@ -104,4 +110,7 @@ openai:text-embedding-3-small:2024-01-25:1536:cosine
 - Never use `DeterministicEmbeddingProvider` in production.
 - Never have more than one `ACTIVE` profile.
 - Do not change the profile version without re-embedding existing durable artifacts.
-- The worker defaults `OPENAI_EMBEDDING_SECRET_NAME` to `openai/api-key`. If the operator stores the embedding key under a different name (e.g. `openai/embedding-api-key`), set the `OPENAI_EMBEDDING_SECRET_NAME` environment variable to that secret name.
+- The worker's default `OPENAI_EMBEDDING_SECRET_NAME` value is `openai/api-key`.
+  The runtime Terraform configuration sets it to `openai/embedding-api-key`; if
+  the operator stores the embedding key under a different name, set the
+  `OPENAI_EMBEDDING_SECRET_NAME` environment variable to that secret name.
