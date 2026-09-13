@@ -56,7 +56,11 @@ AS $$
     LIMIT 1;
 $$;
 
+-- PostgreSQL requires the new function owner to hold CREATE on the schema before it
+-- can accept ownership. Grant it only for the transfer, then revoke it.
+GRANT CREATE ON SCHEMA outreach TO projectx_security_owner;
 ALTER FUNCTION outreach.resolve_inbound_mailbox(TEXT) OWNER TO projectx_security_owner;
+REVOKE CREATE ON SCHEMA outreach FROM projectx_security_owner;
 
 -- Least-privilege execution: PUBLIC is denied, only the runtime app role can use
 -- the narrow resolver, and it has no direct access to the registry table.
