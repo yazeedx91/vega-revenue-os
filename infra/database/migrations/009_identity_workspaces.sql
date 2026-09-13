@@ -67,7 +67,11 @@ AS $$
     WHERE m.user_id = p_user_id::UUID;
 $$;
 
+-- PostgreSQL requires the new function owner to hold CREATE on the schema before it
+-- can accept ownership. Grant it only for the transfer, then revoke it.
+GRANT CREATE ON SCHEMA identity TO projectx_security_owner;
 ALTER FUNCTION identity.list_workspaces_for_user(TEXT) OWNER TO projectx_security_owner;
+REVOKE CREATE ON SCHEMA identity FROM projectx_security_owner;
 REVOKE ALL ON FUNCTION identity.list_workspaces_for_user(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION identity.list_workspaces_for_user(TEXT) TO projectx_app;
 

@@ -129,4 +129,32 @@ describe('004/005 projectx_security_owner regression', () => {
     );
     expect(Array.isArray(result.rows)).toBe(true);
   });
+
+  it('projectx_security_owner owns identity.list_workspaces_for_user and does not retain CREATE on identity', async () => {
+    if (!adminPool) return;
+
+    const ownerResult = await adminPool.query<{ owner: string }>(`
+      SELECT r.rolname AS owner
+      FROM pg_proc p
+      JOIN pg_namespace n ON p.pronamespace = n.oid
+      JOIN pg_roles r ON p.proowner = r.oid
+      WHERE n.nspname = 'identity' AND p.proname = 'list_workspaces_for_user'
+    `);
+    expect(ownerResult.rows).toHaveLength(1);
+    expect(ownerResult.rows[0].owner).toBe('projectx_security_owner');
+
+    const createPrivResult = await adminPool.query<{ has_create: boolean }>(`
+      SELECT has_schema_privilege('projectx_security_owner', 'identity', 'CREATE') AS has_create
+    `);
+    expect(createPrivResult.rows[0].has_create).toBe(false);
+  });
+
+  it('projectx_app can execute identity.list_workspaces_for_user', async () => {
+    if (!appPool) return;
+    const result = await appPool.query<{ id: string }>(
+      'SELECT id FROM identity.list_workspaces_for_user($1)',
+      [randomUUID()],
+    );
+    expect(Array.isArray(result.rows)).toBe(true);
+  });
 });
