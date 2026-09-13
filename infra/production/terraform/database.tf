@@ -30,13 +30,17 @@ resource "azurerm_postgresql_flexible_server" "projectx" {
   geo_redundant_backup_enabled  = false
   public_network_access_enabled = false
 
+  lifecycle {
+    ignore_changes = [zone]
+  }
+
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
 }
 
 resource "azurerm_postgresql_flexible_server_configuration" "pgvector" {
   name      = "azure.extensions"
   server_id = azurerm_postgresql_flexible_server.projectx.id
-  value     = "vector"
+  value     = "uuid-ossp,pgcrypto,vector"
 }
 
 resource "azurerm_postgresql_flexible_server_database" "projectx" {

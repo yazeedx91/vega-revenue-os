@@ -23,6 +23,13 @@ resource "azurerm_container_app_environment" "projectx" {
   resource_group_name        = azurerm_resource_group.projectx.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.projectx.id
   infrastructure_subnet_id   = azurerm_subnet.aca.id
+
+  lifecycle {
+    ignore_changes = [
+      infrastructure_resource_group_name,
+      workload_profile,
+    ]
+  }
 }
 
 resource "azurerm_container_app" "api" {

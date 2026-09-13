@@ -32,6 +32,7 @@ resource "azurerm_container_app_job" "migration" {
   location                     = var.location
   resource_group_name          = azurerm_resource_group.projectx.name
   container_app_environment_id = azurerm_container_app_environment.projectx.id
+  workload_profile_name        = "Consumption"
 
   identity {
     type         = "UserAssigned"
@@ -59,7 +60,7 @@ resource "azurerm_container_app_job" "migration" {
       }
       env {
         name  = "MIGRATIONS_DIR"
-        value = "/migrations"
+        value = "/prod/migration/migrations"
       }
       env {
         name  = "PGHOST"
