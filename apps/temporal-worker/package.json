@@ -25,6 +25,7 @@
     "@projectx/mission-orchestrator": "workspace:*",
     "@projectx/outreach": "workspace:*",
     "@projectx/shared": "workspace:*",
+    "@projectx/specialist-agents": "workspace:*",
     "@projectx/temporal-client": "workspace:*",
     "@projectx/tool-gateway": "workspace:*",
     "@temporalio/activity": "^1.11.0",
