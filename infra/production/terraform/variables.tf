@@ -87,8 +87,18 @@ variable "enable_application_runtime" {
   default     = false
 
   validation {
-    condition     = !var.enable_application_runtime || (var.database_url_secret_id != "" && !var.enable_migration_bootstrap)
-    error_message = "enable_application_runtime requires a non-empty database_url_secret_id and enable_migration_bootstrap must be false"
+    condition = !var.enable_application_runtime || (
+      var.database_url_secret_id != "" &&
+      var.temporal_api_key_secret_id != "" &&
+      var.jwt_signing_key_active_reference != "" &&
+      var.jwt_signing_key_active_kid != "" &&
+      var.entra_jwks_secret_reference != "" &&
+      var.entra_issuer != "" &&
+      var.entra_client_id != "" &&
+      var.entra_allowed_tenant_id != "" &&
+      !var.enable_migration_bootstrap
+    )
+    error_message = "enable_application_runtime requires database_url_secret_id, temporal_api_key_secret_id, identity/JWT/Entra references, and enable_migration_bootstrap=false"
   }
 }
 
@@ -101,5 +111,136 @@ variable "migration_image" {
 variable "database_url_secret_id" {
   type        = string
   description = "Versionless ID of the Azure Key Vault secret holding the runtime DATABASE_URL"
+  default     = ""
+}
+
+# ---------------------------------------------------------------------------
+# Microsoft Graph (optional in SHADOW; required for live inbound/outbound)
+# ---------------------------------------------------------------------------
+variable "graph_tenant_id" {
+  type        = string
+  description = "Entra tenant id for Microsoft Graph client credential flow"
+  default     = ""
+}
+
+variable "graph_client_id" {
+  type        = string
+  description = "Entra application (client) id for Microsoft Graph"
+  default     = ""
+}
+
+variable "graph_client_secret_reference" {
+  type        = string
+  description = "Key Vault secret reference for the Graph application client secret (not the value)"
+  default     = ""
+  sensitive   = true
+}
+
+variable "graph_webhook_callback_url" {
+  type        = string
+  description = "Allowed notification URL prefix for Graph webhook subscriptions"
+  default     = ""
+}
+
+# ---------------------------------------------------------------------------
+# Identity / JWT
+# ---------------------------------------------------------------------------
+variable "jwt_signing_key_active_reference" {
+  type        = string
+  description = "Key Vault secret reference for the active JWT HMAC signing key"
+  default     = ""
+  sensitive   = true
+}
+
+variable "jwt_signing_key_active_kid" {
+  type        = string
+  description = "Key ID (kid) of the active JWT signing key"
+  default     = ""
+}
+
+variable "jwt_signing_key_previous_reference" {
+  type        = string
+  description = "Key Vault secret reference for the previous JWT HMAC signing key during rotation"
+  default     = ""
+  sensitive   = true
+}
+
+variable "jwt_signing_key_previous_kid" {
+  type        = string
+  description = "Key ID (kid) of the previous JWT signing key"
+  default     = ""
+}
+
+variable "jwt_signing_key_previous_valid_until" {
+  type        = string
+  description = "ISO-8601 timestamp until which the previous JWT signing key remains valid"
+  default     = ""
+}
+
+variable "entra_jwks_secret_reference" {
+  type        = string
+  description = "Key Vault secret reference for the Entra OIDC JWKS JSON"
+  default     = ""
+  sensitive   = true
+}
+
+variable "entra_issuer" {
+  type        = string
+  description = "Expected Entra token issuer, e.g. https://login.microsoftonline.com/{tenant}/v2.0"
+  default     = ""
+}
+
+variable "entra_client_id" {
+  type        = string
+  description = "Expected Entra token audience (application client id)"
+  default     = ""
+}
+
+variable "entra_allowed_tenant_id" {
+  type        = string
+  description = "Tenant id allowed to authenticate to the API"
+  default     = ""
+}
+
+# ---------------------------------------------------------------------------
+# Admin / operator
+# ---------------------------------------------------------------------------
+variable "admin_api_key_secret_reference" {
+  type        = string
+  description = "Key Vault secret reference for the operator admin API key"
+  default     = ""
+  sensitive   = true
+}
+
+# ---------------------------------------------------------------------------
+# Embedding / LLM providers
+# ---------------------------------------------------------------------------
+variable "openai_embedding_secret_name" {
+  type        = string
+  description = "Key Vault secret name consumed by the worker embedding runtime"
+  default     = "openai/embedding-api-key"
+}
+
+variable "openai_secret_name" {
+  type        = string
+  description = "Key Vault secret name consumed by the LLM runtime for OpenAI"
+  default     = "openai/api-key"
+}
+
+variable "openai_default_model" {
+  type        = string
+  description = "Default OpenAI model id for the LLM runtime"
+  default     = "gpt-4o-mini"
+}
+
+variable "anthropic_secret_name" {
+  type        = string
+  description = "Key Vault secret name consumed by the LLM runtime for Anthropic (optional)"
+  default     = ""
+}
+
+variable "anthropic_default_model" {
+  type        = string
+  description = "Default Anthropic model id for the LLM runtime (optional)"
   default     = ""
 }

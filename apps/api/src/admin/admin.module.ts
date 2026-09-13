@@ -10,9 +10,25 @@ import {
   PostgresAuditLog,
 } from '@projectx/infrastructure';
 import type { ISecretsProvider, ITelemetry } from '@projectx/infrastructure';
+import type { IGraphSubscriptionClient } from '@projectx/outreach';
 import { GraphSubscriptionAdminService, GraphSubscriptionClient, PostgresGraphSubscriptionRepository } from '@projectx/outreach';
 import { AdminApiKeyGuard } from './admin-api-key.guard';
 import { AdminGraphSubscriptionController } from './admin-graph-subscription.controller';
+
+const disabledGraphClient: IGraphSubscriptionClient = {
+  createSubscription: async () => ({
+    success: false,
+    error: { code: 'GRAPH_DISABLED', message: 'Graph credentials are not configured' },
+  }),
+  listSubscriptions: async () => ({
+    success: false,
+    error: { code: 'GRAPH_DISABLED', message: 'Graph credentials are not configured' },
+  }),
+  deleteSubscription: async () => ({
+    success: false,
+    error: { code: 'GRAPH_DISABLED', message: 'Graph credentials are not configured' },
+  }),
+};
 
 function createSecretsProvider(): ISecretsProvider {
   const vaultUrl = process.env.AZURE_KEY_VAULT_URL;
@@ -76,15 +92,36 @@ async function resolveSecretValue(
       provide: GraphSubscriptionAdminService,
       useFactory: async (secrets: ISecretsProvider, telemetry: ITelemetry) => {
         const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-        const tenantId = process.env.GRAPH_TENANT_ID ?? 'common';
-        const clientId = process.env.GRAPH_CLIENT_ID ?? '';
+        const tenantId = process.env.GRAPH_TENANT_ID;
+        const clientId = process.env.GRAPH_CLIENT_ID;
         const clientSecret = await resolveSecretValue(
           secrets,
           process.env.GRAPH_CLIENT_SECRET,
           process.env.GRAPH_CLIENT_SECRET_REFERENCE,
         );
-        const tokenProvider = new MsalTokenProvider({ tenantId, clientId, clientSecret: clientSecret ?? '' });
-        const client = new GraphSubscriptionClient({ tokenProvider });
+        const hasGraphCredential = Boolean(
+          tenantId &&
+            clientId &&
+            (process.env.GRAPH_CLIENT_SECRET || process.env.GRAPH_CLIENT_SECRET_REFERENCE),
+        );
+
+        if (!hasGraphCredential) {
+          telemetry.log(
+            'warn',
+            'Graph subscription admin service is disabled because Graph tenant/client/credential are not configured',
+            { reason: 'graph_credentials_missing' },
+          );
+        }
+
+        const client: IGraphSubscriptionClient = hasGraphCredential
+          ? new GraphSubscriptionClient({
+              tokenProvider: new MsalTokenProvider({
+                tenantId: tenantId ?? '',
+                clientId: clientId ?? '',
+                clientSecret: clientSecret ?? '',
+              }),
+            })
+          : disabledGraphClient;
         const repository = new PostgresGraphSubscriptionRepository({ pool });
         const auditLog = new PostgresAuditLog({ pool });
         return new GraphSubscriptionAdminService({

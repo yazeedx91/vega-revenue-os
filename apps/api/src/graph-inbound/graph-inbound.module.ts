@@ -125,7 +125,15 @@ function createTelemetry(): ITelemetry {
 
         const secrets = createSecretsProvider(config.azureKeyVaultUrl);
 
-        const messageFetcher = pool
+        const hasGraphCredential =
+          pool &&
+          Boolean(
+            config.graphTenantId &&
+              config.graphClientId &&
+              (config.graphClientSecret || config.graphClientSecretReference),
+          );
+
+        const messageFetcher = hasGraphCredential
           ? new FetchGraphInboundMessageFetcher({
               tokenProvider: new MsalTokenProvider({
                 tenantId: config.graphTenantId ?? '',
@@ -139,6 +147,14 @@ function createTelemetry(): ITelemetry {
               }),
             })
           : new StubGraphInboundMessageFetcher();
+
+        if (!hasGraphCredential && pool) {
+          telemetry.log(
+            'warn',
+            'Graph inbound fetcher is disabled because Graph tenant/client/credential are not configured',
+            { reason: 'graph_credentials_missing' },
+          );
+        }
 
         const subscriptionRepository = pool
           ? new PostgresGraphSubscriptionRepository({ pool })

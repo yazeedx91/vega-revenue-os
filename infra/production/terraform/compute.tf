@@ -111,6 +111,93 @@ resource "azurerm_container_app" "api" {
         name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
         value = azurerm_application_insights.projectx.connection_string
       }
+      env {
+        name  = "GRAPH_TENANT_ID"
+        value = var.graph_tenant_id
+      }
+      env {
+        name  = "GRAPH_CLIENT_ID"
+        value = var.graph_client_id
+      }
+      dynamic "env" {
+        for_each = var.graph_client_secret_reference != "" ? [1] : []
+        content {
+          name  = "GRAPH_CLIENT_SECRET_REFERENCE"
+          value = var.graph_client_secret_reference
+        }
+      }
+      env {
+        name  = "GRAPH_WEBHOOK_CALLBACK_URL"
+        value = var.graph_webhook_callback_url
+      }
+      env {
+        name  = "JWT_SIGNING_KEY_ACTIVE_REFERENCE"
+        value = var.jwt_signing_key_active_reference
+      }
+      env {
+        name  = "JWT_SIGNING_KEY_ACTIVE_KID"
+        value = var.jwt_signing_key_active_kid
+      }
+      dynamic "env" {
+        for_each = var.jwt_signing_key_previous_reference != "" ? [1] : []
+        content {
+          name  = "JWT_SIGNING_KEY_PREVIOUS_REFERENCE"
+          value = var.jwt_signing_key_previous_reference
+        }
+      }
+      dynamic "env" {
+        for_each = var.jwt_signing_key_previous_kid != "" ? [1] : []
+        content {
+          name  = "JWT_SIGNING_KEY_PREVIOUS_KID"
+          value = var.jwt_signing_key_previous_kid
+        }
+      }
+      dynamic "env" {
+        for_each = var.jwt_signing_key_previous_valid_until != "" ? [1] : []
+        content {
+          name  = "JWT_SIGNING_KEY_PREVIOUS_VALID_UNTIL"
+          value = var.jwt_signing_key_previous_valid_until
+        }
+      }
+      env {
+        name  = "ENTRA_JWKS_SECRET_REFERENCE"
+        value = var.entra_jwks_secret_reference
+      }
+      env {
+        name  = "ENTRA_ISSUER"
+        value = var.entra_issuer
+      }
+      env {
+        name  = "ENTRA_CLIENT_ID"
+        value = var.entra_client_id
+      }
+      env {
+        name  = "ENTRA_ALLOWED_TENANT_ID"
+        value = var.entra_allowed_tenant_id
+      }
+      dynamic "env" {
+        for_each = var.admin_api_key_secret_reference != "" ? [1] : []
+        content {
+          name  = "ADMIN_API_KEY_SECRET_REFERENCE"
+          value = var.admin_api_key_secret_reference
+        }
+      }
+
+      liveness_probe {
+        port                    = 3000
+        path                    = "/healthz"
+        transport               = "HTTP"
+        interval_seconds        = 10
+        failure_count_threshold = 3
+      }
+
+      readiness_probe {
+        port                    = 3000
+        path                    = "/readyz"
+        transport               = "HTTP"
+        interval_seconds        = 10
+        failure_count_threshold = 3
+      }
     }
     min_replicas = local.is_test ? 0 : 2
     max_replicas = local.is_test ? 2 : 6
@@ -211,6 +298,48 @@ resource "azurerm_container_app" "worker" {
       env {
         name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
         value = azurerm_application_insights.projectx.connection_string
+      }
+      env {
+        name  = "OPENAI_EMBEDDING_SECRET_NAME"
+        value = var.openai_embedding_secret_name
+      }
+      env {
+        name  = "OPENAI_SECRET_NAME"
+        value = var.openai_secret_name
+      }
+      env {
+        name  = "OPENAI_DEFAULT_MODEL"
+        value = var.openai_default_model
+      }
+      dynamic "env" {
+        for_each = var.anthropic_secret_name != "" ? [1] : []
+        content {
+          name  = "ANTHROPIC_SECRET_NAME"
+          value = var.anthropic_secret_name
+        }
+      }
+      dynamic "env" {
+        for_each = var.anthropic_default_model != "" ? [1] : []
+        content {
+          name  = "ANTHROPIC_DEFAULT_MODEL"
+          value = var.anthropic_default_model
+        }
+      }
+
+      liveness_probe {
+        port                    = 3001
+        path                    = "/healthz"
+        transport               = "HTTP"
+        interval_seconds        = 10
+        failure_count_threshold = 3
+      }
+
+      readiness_probe {
+        port                    = 3001
+        path                    = "/readyz"
+        transport               = "HTTP"
+        interval_seconds        = 10
+        failure_count_threshold = 3
       }
     }
     min_replicas = 1
