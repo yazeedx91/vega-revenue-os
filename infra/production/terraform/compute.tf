@@ -133,7 +133,12 @@ resource "azurerm_container_app" "api" {
     }
   }
 
-  depends_on = [azurerm_role_assignment.api_keyvault]
+  registry {
+    server   = azurerm_container_registry.projectx.login_server
+    identity = azurerm_user_assigned_identity.api.id
+  }
+
+  depends_on = [azurerm_role_assignment.api_keyvault, azurerm_role_assignment.api_acr_pull]
 }
 
 resource "azurerm_container_app" "worker" {
@@ -228,8 +233,13 @@ resource "azurerm_container_app" "worker" {
     }
   }
 
+  registry {
+    server   = azurerm_container_registry.projectx.login_server
+    identity = azurerm_user_assigned_identity.worker.id
+  }
+
   # To scale the worker to zero after a test, run:
   # az containerapp update -g <resource-group> -n <worker-name> --min-replicas 0 --max-replicas 0
 
-  depends_on = [azurerm_role_assignment.worker_keyvault]
+  depends_on = [azurerm_role_assignment.worker_keyvault, azurerm_role_assignment.worker_acr_pull]
 }
