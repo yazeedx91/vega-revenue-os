@@ -82,6 +82,52 @@ SELECT rolname, rolbypassrls, rolsuper, rolcreatedb, rolcreaterole, rolreplicati
 FROM pg_roles WHERE rolname = 'projectx_app';
 ```
 
+## Phase 16 Test/Shadow Deployment Evidence
+
+### Infrastructure drift fixes applied
+
+- `infra/production/terraform/migration.tf`: `MIGRATIONS_DIR=/prod/migration/migrations` to match the image layout.
+- `infra/production/terraform/migration.tf`: explicit `workload_profile_name = "Consumption"` on the migration job.
+- `infra/production/terraform/database.tf`: `azure.extensions = "uuid-ossp,pgcrypto,vector"` allow-list.
+- `infra/production/terraform/database.tf`: `lifecycle { ignore_changes = [zone] }` because Azure auto-assigns availability zone 3.
+- `infra/production/terraform/network.tf`: explicit `actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]` on the ACA subnet delegation.
+- `infra/production/terraform/compute.tf`: `lifecycle { ignore_changes = [infrastructure_resource_group_name, workload_profile] }` on the Container Apps Environment.
+- `infra/production/terraform/compute.tf`: explicit `workload_profile_name = "Consumption"` on API and worker Container Apps.
+- `infra/production/terraform/compute.tf`: explicit `registry` blocks and `depends_on` for API/worker AcrPull role assignments.
+
+### Runtime image dependency fixes applied
+
+- `pnpm-workspace.yaml`: removed override that forced `@nestjs/core` to v11 while the apps remain on v10.
+- `apps/api/package.json`: added missing `@projectx/intelligence` workspace dependency.
+- `apps/temporal-worker/package.json`: added missing `@projectx/specialist-agents` workspace dependency.
+- `apps/api/Dockerfile` and `apps/temporal-worker/Dockerfile`: use `pnpm deploy --legacy` so pnpm v11 copies workspace packages into runtime images.
+
+### Bootstrap execution
+
+- Migration job: `projectx-test-magical-moray-mig-dwd31fi`
+- Status: `Succeeded`
+- Migrations applied: `38`
+- Key Vault secret written: `database-url`
+
+### Final runtime images
+
+- API: `projectxtestmagicalmoray.azurecr.io/projectx-api@sha256:f024d48b4dce0524d4a99d5d95cd2c461a11cafe930fd267972805dc2bd52fe9`
+- Worker: `projectxtestmagicalmoray.azurecr.io/projectx-worker@sha256:31f9d54a949193161bafb49c45ab1f7ca28df7c87605d1424fe3cb6c04d7ea47`
+
+### Final runtime Terraform transition
+
+```text
+Plan: 0 to add, 2 to change, 0 to destroy
+```
+
+Only the API and worker Container App images were updated. No foundation resources were destroyed or replaced.
+
+### Remaining operator blockers for full runtime start
+
+1. **Embedding profile and secret**: exactly one `ACTIVE` row in `embedding.embedding_profiles` and a matching provider key in Key Vault (see `docs/production/EMBEDDING_PROFILE_BOOTSTRAP.md` and `docs/production/SECRET_INVENTORY.md`).
+2. **Entra / Microsoft Graph secrets**: API startup requires valid Graph/Calendar/Dynamics credentials in Key Vault under the names in `docs/production/SECRET_INVENTORY.md`.
+3. These are human/provider secrets; they cannot be generated or guessed by Devin. Once they are provisioned, run the final runtime plan again.
+
 ## Rollback
 
 - The migration runner does not support automatic down-migration.
