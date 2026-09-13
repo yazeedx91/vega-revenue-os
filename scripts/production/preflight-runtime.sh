@@ -90,6 +90,6 @@ terraform -chdir="$TERRAFORM_DIR" plan \
   -var="graph_webhook_callback_url=\${GRAPH_WEBHOOK_CALLBACK_URL:-}" \
   -var="admin_api_key_secret_reference=\${ADMIN_API_KEY_SECRET_REFERENCE:-}" \
   -var="openai_embedding_secret_name=\${OPENAI_EMBEDDING_SECRET_NAME:-openai/embedding-api-key}" \
-  -var="api_image=<current-api-digest>" \
-  -var="worker_image=<current-worker-digest>"
+  -var="api_image=projectxtestmagicalmoray.azurecr.io/projectx-api@sha256:423dfcb51912bcb87c86a44877240bdc748d6c465396b90ccc1dfeb9e365d7d2" \
+  -var="worker_image=projectxtestmagicalmoray.azurecr.io/projectx-worker@sha256:6bb268048336daddba751a9efe5b89e3137bf24cf8d49af8327b4d4306d4e370"
 EOF

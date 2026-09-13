@@ -17,11 +17,18 @@ import { AuthController } from './auth.controller';
 import { WorkspaceController } from './workspace.controller';
 import { JwtAuthGuard, TenantGuard, PermissionsGuard } from './auth.guard';
 
+function isProduction(): boolean {
+  return process.env.NODE_ENV === 'production';
+}
+
 async function resolveSecret(
   secrets: ISecretsProvider,
   envValue: string | undefined,
   secretReference: string | undefined,
 ): Promise<string | undefined> {
+  if (isProduction() && envValue) {
+    throw new Error('Raw *_SECRET values are not allowed in production; use *_SECRET_REFERENCE');
+  }
   if (envValue) return envValue;
   if (secretReference) {
     try {
@@ -128,6 +135,9 @@ async function resolveSecret(
         const vaultUrl = process.env.AZURE_KEY_VAULT_URL;
         if (vaultUrl) {
           return new AzureKeyVaultSecretsProvider({ vaultUrl });
+        }
+        if (isProduction()) {
+          throw new Error('AZURE_KEY_VAULT_URL is required in production; EnvironmentSecretsProvider is not allowed');
         }
         return new EnvironmentSecretsProvider();
       },

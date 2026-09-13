@@ -57,13 +57,26 @@ function Set-OperatorSecret {
   }
 
   if ($PSCmdlet.ShouldProcess("$VaultName/$Name", 'Set Key Vault secret')) {
-    az keyvault secret set `
-      --vault-name $VaultName `
-      --name $Name `
-      --value $plain `
-      --tags purpose=$Description owner=operator rotation-date=$(Get-Date -Format 'yyyy-MM-dd') | Out-Null
+    # Write the value to a temporary file so it is NOT exposed on the az
+    # command line, then remove the file as soon as the CLI returns.
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    try {
+      [System.IO.File]::WriteAllText($tempFile, $plain)
 
-    Write-Host "Secret '$Name' set in Key Vault '$VaultName'." -ForegroundColor Green
+      az keyvault secret set `
+        --vault-name $VaultName `
+        --name $Name `
+        --file $tempFile `
+        --tags purpose=$Description owner=operator rotation-date=$(Get-Date -Format 'yyyy-MM-dd') `
+        --output none
+
+      Write-Host "Secret '$Name' set in Key Vault '$VaultName'." -ForegroundColor Green
+    }
+    finally {
+      if (Test-Path $tempFile) {
+        [System.IO.File]::Delete($tempFile)
+      }
+    }
   }
 }
 
