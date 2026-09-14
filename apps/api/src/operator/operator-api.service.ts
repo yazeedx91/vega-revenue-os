@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Pool } from 'pg';
 import { PostgresClient } from '@projectx/infrastructure';
 import type { TenantContext } from '@projectx/domain';
@@ -6,7 +6,7 @@ import type { TenantContext } from '@projectx/domain';
 @Injectable()
 export class OperatorApiService {
   private readonly db: PostgresClient;
-  constructor(pool?: Pool) {
+  constructor(@Optional() @Inject('DATABASE_POOL') pool?: Pool) {
     this.db = new PostgresClient(pool ?? new Pool({ connectionString: process.env.DATABASE_URL, max: 5 }));
   }
 
