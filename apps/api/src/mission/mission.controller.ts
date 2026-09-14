@@ -22,6 +22,7 @@ import {
 } from '@projectx/shared';
 import { JwtAuthGuard, TenantGuard, PermissionsGuard, CurrentUser, RequirePermissions, type RequestUser } from '../identity/auth.guard';
 import type { CreateMissionDto } from './mission.dto';
+import { Inject } from '@nestjs/common';
 
 function buildContext(user: RequestUser): TenantContext {
   return {
@@ -53,7 +54,7 @@ const INITIAL_PLAN: MissionPlan = {
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
 export class MissionController {
   constructor(
-    private readonly missionRepository: IMissionRepository,
+    @Inject('MISSION_REPOSITORY') private readonly missionRepository: IMissionRepository,
     private readonly createHandler: CreateMissionHandler,
     private readonly orchestrator: MissionOrchestratorService,
   ) {}
