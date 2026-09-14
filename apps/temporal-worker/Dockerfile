@@ -31,6 +31,8 @@ LABEL org.opencontainers.image.revision="${GIT_SHA}"
 LABEL org.opencontainers.image.version="${CERTIFIED_RELEASE}"
 LABEL org.opencontainers.image.title="ProjectX Temporal Worker"
 
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /prod/worker
 COPY --from=builder --chown=node:node /prod/worker .
 
