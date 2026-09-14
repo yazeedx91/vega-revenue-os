@@ -12,7 +12,7 @@ import {
 import type { ISecretsProvider, ITelemetry } from '@projectx/infrastructure';
 import type { IGraphSubscriptionClient } from '@projectx/outreach';
 import { GraphSubscriptionAdminService, GraphSubscriptionClient, PostgresGraphSubscriptionRepository } from '@projectx/outreach';
-import { AdminApiKeyGuard } from './admin-api-key.guard';
+import { AdminApiKeyGuard, type AdminApiKeyGuardConfig } from './admin-api-key.guard';
 import { AdminGraphSubscriptionController } from './admin-graph-subscription.controller';
 
 const disabledGraphClient: IGraphSubscriptionClient = {
@@ -76,15 +76,16 @@ async function resolveSecretValue(
       provide: 'TELEMETRY',
       useFactory: createTelemetry,
     },
+    AdminApiKeyGuard,
     {
-      provide: AdminApiKeyGuard,
+      provide: 'ADMIN_API_KEY_GUARD_CONFIG',
       useFactory: async (secrets: ISecretsProvider) => {
         const key = await resolveSecretValue(
           secrets,
           process.env.ADMIN_API_KEY,
           process.env.ADMIN_API_KEY_SECRET_REFERENCE,
         );
-        return new AdminApiKeyGuard({ getExpectedKey: () => key });
+        return { getExpectedKey: () => key } satisfies AdminApiKeyGuardConfig;
       },
       inject: ['SECRETS_PROVIDER'],
     },

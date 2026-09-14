@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Inject, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
 import type { Request } from 'express';
 import { timingSafeEqual } from 'crypto';
 
@@ -8,12 +8,12 @@ export interface AdminApiKeyGuardConfig {
 
 @Injectable()
 export class AdminApiKeyGuard implements CanActivate {
-  constructor(private readonly config: AdminApiKeyGuardConfig) {}
+  constructor(@Optional() @Inject('ADMIN_API_KEY_GUARD_CONFIG') private readonly config?: AdminApiKeyGuardConfig) {}
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
     const provided = this.extractKey(request);
-    const expected = this.config.getExpectedKey();
+    const expected = this.config?.getExpectedKey();
 
     if (!expected || !provided) {
       throw new UnauthorizedException('Admin API key is required');
