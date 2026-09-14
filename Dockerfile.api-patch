@@ -1,0 +1,2 @@
+FROM projectxtestmagicalmoray.azurecr.io/projectx-api@sha256:28ded50a7ddbc8a3e37a1c8f5144e17898e9c776336084b6f82de5924ec4f034
+COPY --chown=node:node apps/api/dist /prod/api/dist

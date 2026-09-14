@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { ApprovalApplicationService } from '@projectx/mission-orchestrator';
 import type { TenantContext } from '@projectx/domain';
 import { asCorrelationId } from '@projectx/shared';
-import { APPROVAL_SERVICE } from './approval.module';
+import { APPROVAL_SERVICE } from './approval.constants';
 import { CurrentUser, JwtAuthGuard, PermissionsGuard, RequirePermissions, TenantGuard, type RequestUser } from '../identity/auth.guard';
 
 export interface ApprovalDecisionBody {

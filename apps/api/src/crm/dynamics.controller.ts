@@ -1,7 +1,7 @@
 import { BadRequestException, Controller, Get, Inject, Param, Query, UseGuards } from '@nestjs/common';
 import { asCorrelationId } from '@projectx/shared';
 import { CurrentUser, JwtAuthGuard, PermissionsGuard, RequirePermissions, TenantGuard, type RequestUser } from '../identity/auth.guard';
-import { DYNAMICS_QUERY_SERVICE } from './dynamics.module';
+import { DYNAMICS_QUERY_SERVICE } from './dynamics.constants';
 import { DynamicsQueryService } from './dynamics-query.service';
 
 @Controller('crm/dynamics')

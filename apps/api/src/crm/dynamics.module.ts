@@ -4,8 +4,7 @@ import { DynamicsIntelligenceAdapter, FetchDataverseReadHttpClient, MsalDynamics
 import { IdentityModule } from '../identity/identity.module';
 import { DynamicsController } from './dynamics.controller';
 import { DynamicsQueryService } from './dynamics-query.service';
-
-export const DYNAMICS_QUERY_SERVICE = 'DYNAMICS_QUERY_SERVICE';
+import { DYNAMICS_QUERY_SERVICE } from './dynamics.constants';
 
 function authorities(): DynamicsAuthority[] {
   const raw = process.env.DYNAMICS_AUTHORITIES_JSON;

@@ -3,8 +3,7 @@ import type { ISecretsProvider } from '@projectx/infrastructure';
 import { FetchGraphCalendarHttpClient, GraphCalendarProvider, MsalCalendarTokenProviderFactory, StaticWorkspaceCalendarAuthorityResolver, type CalendarAuthority } from '@projectx/outreach';
 import { IdentityModule } from '../identity/identity.module';
 import { CalendarController } from './calendar.controller';
-
-export const CALENDAR_PROVIDER = 'CALENDAR_PROVIDER';
+import { CALENDAR_PROVIDER } from './calendar.constants';
 
 function authorities(): CalendarAuthority[] {
   const raw = process.env.CALENDAR_GRAPH_AUTHORITIES_JSON;

@@ -8,8 +8,7 @@ import type { CorrelationId, EventId, TenantId } from '@projectx/shared';
 import { randomUUID } from 'crypto';
 import { ApprovalController } from './approval.controller';
 import { IdentityModule } from '../identity/identity.module';
-
-export const APPROVAL_SERVICE = 'APPROVAL_SERVICE';
+import { APPROVAL_SERVICE } from './approval.constants';
 
 class NoOpWorkflowClient implements IWorkflowClient {
   async start<TInput>(

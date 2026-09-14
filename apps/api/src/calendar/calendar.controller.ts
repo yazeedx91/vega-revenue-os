@@ -3,7 +3,7 @@ import type { GraphCalendarProvider } from '@projectx/outreach';
 import { asCorrelationId } from '@projectx/shared';
 import { CurrentUser, JwtAuthGuard, PermissionsGuard, RequirePermissions, TenantGuard, type RequestUser } from '../identity/auth.guard';
 import { ResourceIdPipe } from '../operator/resource-id.pipe';
-import { CALENDAR_PROVIDER } from './calendar.module';
+import { CALENDAR_PROVIDER } from './calendar.constants';
 
 @Controller('calendar')
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard)
