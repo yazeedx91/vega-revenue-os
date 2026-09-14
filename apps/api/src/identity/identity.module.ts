@@ -159,6 +159,6 @@ async function resolveSecret(
     TenantGuard,
     PermissionsGuard,
   ],
-  exports: [JwtAuthGuard, TenantGuard, PermissionsGuard, 'SECRETS_PROVIDER'],
+  exports: [JwtAuthGuard, TenantGuard, PermissionsGuard, 'SECRETS_PROVIDER', 'AUTH_SERVICE', 'WORKSPACE_SERVICE'],
 })
 export class IdentityModule {}
