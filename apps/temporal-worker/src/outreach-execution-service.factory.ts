@@ -209,48 +209,65 @@ export async function createOutreachExecutionService(
     const graphClientSecret =
       (await resolveSecretValue(secrets, config.graphClientSecret, config.graphClientSecretReference)) ?? '';
     const senderAddress = process.env.GRAPH_SENDER_ADDRESS ?? '';
-    const tokenProvider = new MsalTokenProvider({
-      tenantId: graphTenantId,
-      clientId: graphClientId,
-      clientSecret: graphClientSecret,
-    });
-    const httpClient = new FetchGraphHttpClient();
-    const graphProvider = new GraphEmailProvider({ tokenProvider, httpClient, senderAddress });
-    registry.register(graphProvider);
-    console.info(
-      JSON.stringify({
-        level: 'info',
-        code: 'OUTREACH_PROVIDER_REGISTERED',
-        providerId: graphProvider.providerId,
-        channel: graphProvider.channel,
-        senderAddress,
-        timestamp: new Date().toISOString(),
-      }),
-    );
+    const hasGraphCredential = graphTenantId && graphClientId && graphClientSecret;
 
-    // Load explicit tenant → channel → provider mappings from the authoritative
-    // configuration table. Without a mapping the registry returns null and
-    // executeApprovedSend fails closed (no accidental global fallback).
-    const configRows = await adapters.pool!.query(
-      'SELECT tenant_id, provider_id, channel FROM outreach.tenant_email_config',
-    );
-    console.info(
-      JSON.stringify({
-        level: 'info',
-        code: 'TENANT_PROVIDER_CONFIG_LOADED',
-        rowCount: configRows.rowCount,
-        timestamp: new Date().toISOString(),
-      }),
-    );
-    for (const row of configRows.rows) {
-      registry.setTenantProvider(row.tenant_id as string, row.channel as OutreachChannel, row.provider_id as string);
+    if (hasGraphCredential) {
+      const tokenProvider = new MsalTokenProvider({
+        tenantId: graphTenantId,
+        clientId: graphClientId,
+        clientSecret: graphClientSecret,
+      });
+      const httpClient = new FetchGraphHttpClient();
+      const graphProvider = new GraphEmailProvider({ tokenProvider, httpClient, senderAddress });
+      registry.register(graphProvider);
       console.info(
         JSON.stringify({
           level: 'info',
-          code: 'TENANT_PROVIDER_MAPPING_SET',
-          tenantId: row.tenant_id as string,
-          channel: row.channel as string,
-          providerId: row.provider_id as string,
+          code: 'OUTREACH_PROVIDER_REGISTERED',
+          providerId: graphProvider.providerId,
+          channel: graphProvider.channel,
+          senderAddress,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+
+      // Load explicit tenant → channel → provider mappings from the authoritative
+      // configuration table. Without a mapping the registry returns null and
+      // executeApprovedSend fails closed (no accidental global fallback).
+      const configRows = await adapters.pool!.query(
+        'SELECT tenant_id, provider_id, channel FROM outreach.tenant_email_config',
+      );
+      console.info(
+        JSON.stringify({
+          level: 'info',
+          code: 'TENANT_PROVIDER_CONFIG_LOADED',
+          rowCount: configRows.rowCount,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+      for (const row of configRows.rows) {
+        registry.setTenantProvider(row.tenant_id as string, row.channel as OutreachChannel, row.provider_id as string);
+        console.info(
+          JSON.stringify({
+            level: 'info',
+            code: 'TENANT_PROVIDER_MAPPING_SET',
+            tenantId: row.tenant_id as string,
+            channel: row.channel as string,
+            providerId: row.provider_id as string,
+            timestamp: new Date().toISOString(),
+          }),
+        );
+      }
+    } else {
+      const stubProvider = new StubEmailProvider({ type: 'success', costUsd: 0.05 });
+      registry.register(stubProvider);
+      console.info(
+        JSON.stringify({
+          level: 'info',
+          code: 'OUTREACH_PROVIDER_REGISTERED',
+          providerId: stubProvider.providerId,
+          channel: stubProvider.channel,
+          reason: 'graph_credentials_missing',
           timestamp: new Date().toISOString(),
         }),
       );
