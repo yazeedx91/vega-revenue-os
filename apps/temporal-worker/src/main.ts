@@ -98,6 +98,7 @@ function assertControlledSendMode(useDurable: boolean): void {
 async function runMissionWorker(connection: NativeConnection): Promise<void> {
   const worker = await Worker.create({
     connection,
+    namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
     workflowsPath: require.resolve('./workflows/mission-workflow'),
     taskQueue: 'mission-execution',
     activities,
@@ -110,6 +111,7 @@ async function runMissionWorker(connection: NativeConnection): Promise<void> {
 async function runKnowledgeWorker(connection: NativeConnection): Promise<void> {
   const worker = await Worker.create({
     connection,
+    namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
     workflowsPath: require.resolve('./workflows/knowledge-ingestion-workflow'),
     taskQueue: 'knowledge-ingestion',
     activities,
@@ -135,6 +137,7 @@ async function runOutreachWorker(connection: NativeConnection): Promise<void> {
   setSequenceRepository(sequenceRepo);
   const worker = await Worker.create({
     connection,
+    namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
     workflowsPath: require.resolve('./workflows/outreach-sequence-workflow'),
     taskQueue: 'outreach-execution',
     activities: require('./activities/outreach-activities'),
