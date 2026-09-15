@@ -13,7 +13,7 @@
 | Microsoft Graph — Calendar | Certified | Certified | None |
 | OpenAI — Embeddings | Certified | Pending | OpenAI `credit_balance_exhausted` |
 | OpenAI — LLM | Certified | Pending | OpenAI `credit_balance_exhausted` |
-| Dynamics 365 / Dataverse | Not started | Not started | Dataverse environment + Entra app required |
+| Dynamics 365 / Dataverse | Partial / Blocked | Blocked | Tenant lacks Dynamics 365 `user_impersonation` application role (needs paid license or licensed tenant) |
 
 ## Safety Settings Verified
 
@@ -49,15 +49,46 @@ EMBEDDING_OK dim=1536 tokens=2
 - OpenAI accepts the API key.
 - Response: `HTTP 429` `insufficient_quota` / `credit_balance_exhausted`.
 
+## Dynamics 365 / Dataverse
+
+- A 30-day **Dynamics 365 Sales** trial environment was created at `https://org428deb7b.crm4.dynamics.com/`.
+- A new Entra app `ProjectX-Dynamics-Dataverse` was created.
+- The `Dynamics CRM` service principal in the `AxonX` tenant was inspected:
+
+```bash
+az ad sp show --id 00000007-0000-0000-c000-000000000000
+```
+
+Result:
+
+```json
+{
+  "appRoles": [],
+  "scopes": [
+    {
+      "id": "78ce3f0f-a1ce-49c2-8cde-64b5c0896db4",
+      "value": "user_impersonation"
+    }
+  ]
+}
+```
+
+- **Problem:** `user_impersonation` is only available as a **delegated** scope, not as an **application** `appRole`. ProjectX uses client credentials, which require an `appRole`.
+- The **Application permissions** blade in the Entra portal is disabled because there are no `appRoles` to grant.
+- This is a **tenant-level licensing issue** — the `AxonX` tenant does not have a paid Dynamics 365 license that publishes the `user_impersonation` application role.
+
+### Resolutions
+
+1. **Buy a Dynamics 365 license** in the `AxonX` tenant (e.g. Sales Professional, USD $65/user/month). This will publish the `user_impersonation` `appRole`.
+2. **Use a different tenant** that already has a licensed Dataverse environment. Create the Entra app there and set that tenant's `entraTenantId` in `DYNAMICS_AUTHORITIES_JSON`.
+3. **Use the `dynamics-intelligence-adapter.stub.ts` test double** to keep the platform running in shadow mode without real Dataverse calls.
+
 ## Remaining Blockers
 
 1. **OpenAI billing credits** must be added to run live embedding and LLM calls and finish certification.
-2. **Dynamics 365 / Dataverse** requires:
-   - A real Dataverse organization URL.
-   - A dedicated Entra app registration with admin consent.
-   - `DYNAMICS_AUTHORITIES_JSON` configured on the API.
+2. **Dynamics 365 / Dataverse** requires a tenant with a paid Dynamics 365 license or an existing licensed Dataverse environment.
 
 ## Next Steps
 
 1. Add OpenAI credits and rerun the live embedding/LLM smoke tests.
-2. Obtain the Dynamics 365 / Dataverse credentials and continue with that provider certification.
+2. When a licensed Dataverse tenant is available, create the Entra app, grant `user_impersonation` application permission, set `dynamics/client-id`, `dynamics/client-secret`, and `DYNAMICS_AUTHORITIES_JSON`, and run the Dataverse smoke test.
