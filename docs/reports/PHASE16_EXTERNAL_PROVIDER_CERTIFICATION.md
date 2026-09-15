@@ -11,6 +11,7 @@
 | Provider | Wiring | Live External Call | Blocker |
 |----------|--------|--------------------|---------|
 | Microsoft Graph — Calendar | Certified | Certified | None |
+| Microsoft Graph — Mail.Send | Certified | Certified | None |
 | OpenAI — Embeddings | Certified | Pending | OpenAI `credit_balance_exhausted` |
 | OpenAI — LLM | Certified | Pending | OpenAI `credit_balance_exhausted` |
 | Dynamics 365 / Dataverse | Partial / Blocked | Blocked | Tenant lacks Dynamics 365 `user_impersonation` application role (needs paid license or licensed tenant) |
@@ -43,6 +44,16 @@
 - MSAL client-credentials token acquisition succeeded.
 - `getSchedule` returned `HTTP 200` with an empty schedule for the test window.
 - No event mutations were performed.
+
+## Mail.Send (Microsoft Graph)
+
+- `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_SENDER_ADDRESS` configured on API and worker.
+- `graph-client-secret` stored in Azure Key Vault.
+- `GRAPH_CLIENT_SECRET_REFERENCE=graph-client-secret` set on API and worker.
+- Entra app `ProjectX-Graph-Mail` (`c61ceea8-4a99-43de-8c0b-497d28a5375f`) has `Mail.Send` and `Mail.Read` application permissions.
+- Admin consent granted for `Mail.Send` and `Mail.Read`.
+- Direct Graph API test: `POST /users/yazeedx91@shaheenpulse.com/sendMail` returned `HTTP 202 Accepted`.
+- Test email received at `YazeedX91@AxonXXX.onmicrosoft.com`.
 
 ## Embeddings (OpenAI)
 
@@ -160,4 +171,4 @@ The full ProjectX test matrix was run locally against the Docker Compose integra
 
 ## Conclusion
 
-The ProjectX TEST/SHADOW control plane is **healthy, reachable, and fully end-to-end tested**. All mandatory infrastructure checks, Terraform/bootstrap verification, DNS/TLS, deployment safety settings, package tests, and the full Phase 14 E2E suite pass with 0 failures. The only remaining items are external billing/licensing blockers (OpenAI and Dynamics). Once those are resolved, rerun the embedding, LLM, and Dataverse live smoke tests.
+The ProjectX TEST/SHADOW control plane is **healthy, reachable, and fully end-to-end tested**. All mandatory infrastructure checks, Terraform/bootstrap verification, DNS/TLS, deployment safety settings, package tests, and the full Phase 14 E2E suite pass with 0 failures. Microsoft Graph Mail.Send is now externally certified. The only remaining items are external billing/licensing blockers (OpenAI and Dynamics). Once those are resolved, rerun the embedding, LLM, and Dataverse live smoke tests.
