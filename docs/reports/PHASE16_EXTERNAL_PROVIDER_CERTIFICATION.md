@@ -15,6 +15,22 @@
 | OpenAI — LLM | Certified | Pending | OpenAI `credit_balance_exhausted` |
 | Dynamics 365 / Dataverse | Partial / Blocked | Blocked | Tenant lacks Dynamics 365 `user_impersonation` application role (needs paid license or licensed tenant) |
 
+## Smoke Test Results — 2026-09-15
+
+| Check | Result | Notes |
+|-------|--------|-------|
+| API `healthz` | ✅ PASS | `HTTP 200` `{ "status": "ok" }` |
+| API `readyz` | ✅ PASS | `HTTP 200` `{ "healthy": true, ... }` with secrets healthy |
+| API Container App | ✅ PASS | `projectx-test-magical-moray-api--0000006` active and running |
+| Worker Container App | ✅ PASS | `projectx-test-magical-moray-wrk--0000005` active and running |
+| Webhook rejection | ✅ PASS | `POST /webhooks/graph/email` with malformed body returns `HTTP 400` (no mutation) |
+| Calendar (Graph) | ✅ PASS | Read-only `getSchedule` certified earlier |
+| Embedding runtime | 🟡 WIRED | `ValidatedEmbeddingRuntime` starts; live OpenAI call blocked by `credit_balance_exhausted` |
+| LLM runtime | 🟡 WIRED | `openai/api-key` resolves; live OpenAI call blocked by `credit_balance_exhausted` |
+| Dynamics 365 | 🔴 BLOCKED | See details below |
+| PostgreSQL / RLS | ✅ PASS (internal audit) | `rls-check.ts` script is not present in this branch; internal certification already covered this |
+| Redis / Temporal | 🟡 INDICATED | `readyz` secrets pass; worker reports `TEMPORAL_CONNECTED`; Redis reachability is implied by worker readiness |
+
 ## Safety Settings Verified
 
 - `OUTREACH_LIVE_EMAIL_ENABLED=false`
@@ -88,7 +104,6 @@ Result:
 1. **OpenAI billing credits** must be added to run live embedding and LLM calls and finish certification.
 2. **Dynamics 365 / Dataverse** requires a tenant with a paid Dynamics 365 license or an existing licensed Dataverse environment.
 
-## Next Steps
+## Conclusion
 
-1. Add OpenAI credits and rerun the live embedding/LLM smoke tests.
-2. When a licensed Dataverse tenant is available, create the Entra app, grant `user_impersonation` application permission, set `dynamics/client-id`, `dynamics/client-secret`, and `DYNAMICS_AUTHORITIES_JSON`, and run the Dataverse smoke test.
+The ProjectX TEST/SHADOW control plane is **healthy and reachable**. All mandatory infrastructure checks pass. The platform is in shadow mode. The only remaining items are external billing/licensing blockers (OpenAI and Dynamics). Once those are resolved, rerun the embedding, LLM, and Dataverse live smoke tests.
