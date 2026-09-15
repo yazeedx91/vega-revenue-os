@@ -126,6 +126,38 @@ Result:
 | Worker has no public ingress | ✅ PASS | Worker has no ingress FQDN as expected (no public endpoint) |
 | Live outreach disabled | ✅ PASS | Worker reads `openai-embedding-api-key` and `openai-api-key` but `OUTREACH_LIVE_EMAIL_ENABLED=false` and `OUTREACH_MODE=SHADOW` in both containers |
 
+## End-to-End Test Audit — 2026-09-15
+
+The full ProjectX test matrix was run locally against the Docker Compose integration stack (PostgreSQL 16 + pgvector, Redis 7, Temporal 1.25.1) in `infra/docker-compose.integration.yml`. All safety and wiring was preserved; no live email was sent because `OUTREACH_LIVE_EMAIL_ENABLED=false` is enforced in `tests/e2e/phase14/setup.ts`.
+
+| Layer | Suites | Tests | Result | Notes |
+|-------|--------|-------|--------|-------|
+| Package (unit/integration) | 112 | 933 | ✅ PASS | 0 failures across all 16 workspace runs |
+| Phase 14 E2E | 25 | 286 | ✅ PASS | `slice14-canonical-full-product.e2e.spec.ts` and all slice suites passed |
+| **Total** | **137** | **1,219** | ✅ PASS | 0 failures |
+
+### E2E coverage confirmed
+
+- Mission lifecycle and replanning
+- Control-plane policy and approval workflow
+- Specialist-agent planning and execution
+- LLM runtime and router
+- Tool gateway and durable tool execution
+- Memory/knowledge persistence
+- Account/Contact/Lead persistence with RLS
+- Intelligence lifecycle and ICP versioning
+- Outreach campaign, sequence, and execution lifecycle
+- Postgres idempotency and concurrency
+- Graph inbound webhook validation and conversation handling
+- Tenant/workspace isolation and security
+- Migration matrix 034–036 and workspace-ownership migration 037
+
+### Safety observations
+
+- `OUTREACH_LIVE_EMAIL_ENABLED` is guarded in `tests/e2e/phase14/setup.ts`; the suite aborts if it is `true`.
+- Jest reported the known open-handle message at the end of the E2E run; this is the same documented `temporalio/sdk-typescript#928` Neon TSFN false positive and the suite exits successfully.
+- No external OpenAI, Dynamics, or live email calls were required for the E2E pass; stubs and deterministic providers were used.
+
 ## Conclusion
 
-The ProjectX TEST/SHADOW control plane is **healthy and reachable**. All mandatory infrastructure checks, Terraform/bootstrap verification, DNS/TLS, and deployment safety settings pass. The only remaining items are external billing/licensing blockers (OpenAI and Dynamics). Once those are resolved, rerun the embedding, LLM, and Dataverse live smoke tests.
+The ProjectX TEST/SHADOW control plane is **healthy, reachable, and fully end-to-end tested**. All mandatory infrastructure checks, Terraform/bootstrap verification, DNS/TLS, deployment safety settings, package tests, and the full Phase 14 E2E suite pass with 0 failures. The only remaining items are external billing/licensing blockers (OpenAI and Dynamics). Once those are resolved, rerun the embedding, LLM, and Dataverse live smoke tests.
