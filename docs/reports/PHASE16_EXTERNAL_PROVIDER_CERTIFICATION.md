@@ -104,6 +104,28 @@ Result:
 1. **OpenAI billing credits** must be added to run live embedding and LLM calls and finish certification.
 2. **Dynamics 365 / Dataverse** requires a tenant with a paid Dynamics 365 license or an existing licensed Dataverse environment.
 
+## Option B: Terraform / Bootstrap Verification
+
+| Check | Result | Notes |
+|-------|--------|-------|
+| Remote backend state | ✅ PASS | `projectxtfstate9zrvw3sr/tfstate/projectx-test-shadow.tfstate` exists, 115,630 bytes, unlocked, last modified 2026-09-14 |
+| TF state resource group | ✅ PASS | `projectx-tfstate-rg` exists in `uaenorth` |
+| Bootstrap Key Vault secrets | ✅ PASS | `database-url`, `TEMPORAL-API-KEY`, `jwt-active-signing-key`, `entra-jwks`, `openai-api-key`, `openai-embedding-api-key`, `graph-client-secret`, `graph-calendar-client-id`, `graph-calendar-client-secret` are present |
+| Migration job | ✅ PASS | No active `projectx-test-magical-moray-mig` job; migration has already been applied. `database-url` secret and `readyz`/worker connectivity confirm database is reachable |
+| Container App revisions | ✅ PASS | API active: `projectx-test-magical-moray-api--0000006`; Worker active: `projectx-test-magical-moray-wrk--0000005` |
+| Safety env vars on API | ✅ PASS | `OUTREACH_LIVE_EMAIL_ENABLED=false`, `OUTREACH_MODE=SHADOW` |
+| Safety env vars on Worker | ✅ PASS | `OUTREACH_LIVE_EMAIL_ENABLED=false`, `OUTREACH_MODE=SHADOW` |
+
+## Option C: DNS / TLS and Deployment Verification
+
+| Check | Result | Notes |
+|-------|--------|-------|
+| Custom domain DNS | ✅ PASS | `api.shaheenpulse.com` resolves to `74.162.103.223` with CNAME to `projectx-test-magical-moray-api.happymeadow-cd9e1634.uaenorth.azurecontainerapps.io` |
+| Custom domain binding | ✅ PASS | `api.shaheenpulse.com` bound to API Container App with SNI-enabled managed certificate |
+| TLS certificate | ✅ PASS | Subject `CN=api.shaheenpulse.com`, issued by `GeoTrust TLS RSA CA G1`, valid `2026-09-14` to `2027-03-14` |
+| Worker has no public ingress | ✅ PASS | Worker has no ingress FQDN as expected (no public endpoint) |
+| Live outreach disabled | ✅ PASS | Worker reads `openai-embedding-api-key` and `openai-api-key` but `OUTREACH_LIVE_EMAIL_ENABLED=false` and `OUTREACH_MODE=SHADOW` in both containers |
+
 ## Conclusion
 
-The ProjectX TEST/SHADOW control plane is **healthy and reachable**. All mandatory infrastructure checks pass. The platform is in shadow mode. The only remaining items are external billing/licensing blockers (OpenAI and Dynamics). Once those are resolved, rerun the embedding, LLM, and Dataverse live smoke tests.
+The ProjectX TEST/SHADOW control plane is **healthy and reachable**. All mandatory infrastructure checks, Terraform/bootstrap verification, DNS/TLS, and deployment safety settings pass. The only remaining items are external billing/licensing blockers (OpenAI and Dynamics). Once those are resolved, rerun the embedding, LLM, and Dataverse live smoke tests.
