@@ -1,8 +1,8 @@
 {
-  "name": "projectx",
+  "name": "vega-revenue-os",
   "version": "0.0.1",
   "private": true,
-  "description": "AI-Native Autonomous Revenue Employee — TypeScript/NestJS monorepo foundation",
+  "description": "Vega RevenueOS — Autonomous Industrial Revenue Intelligence & Execution System",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm --workspace-concurrency=1 -r test",
