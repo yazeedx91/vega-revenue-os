@@ -169,6 +169,27 @@ The full ProjectX test matrix was run locally against the Docker Compose integra
 - Jest reported the known open-handle message at the end of the E2E run; this is the same documented `temporalio/sdk-typescript#928` Neon TSFN false positive and the suite exits successfully.
 - No external OpenAI, Dynamics, or live email calls were required for the E2E pass; stubs and deterministic providers were used.
 
+## Allowlist and Suppression Status — 2026-09-16
+
+| Check | Result | Notes |
+|-------|--------|-------|
+| Allowlist populated | ✅ PASS | `YazeedX91@AxonXXX.onmicrosoft.com` inserted into `outreach.allowed_recipients` for tenant `projectx-test` |
+| Suppression check | ✅ PASS | Recipient not on suppression list (count: 0) |
+| Outreach mode | ✅ PASS | `OUTREACH_MODE=ALLOWLIST_ONLY` configured on deployed apps |
+| Live email flag | ✅ PASS | `OUTREACH_LIVE_EMAIL_ENABLED=false` on deployed apps (safe default) |
+
+## Phase 14.8 Real-Send Status — 2026-09-16
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Graph Mail.Send | ✅ Certified | Live email sent and received via direct API test |
+| Allowlist | ✅ Ready | Test recipient populated and approved |
+| Suppression | ✅ Clear | Recipient not suppressed |
+| PostgreSQL connectivity | 🔴 Deferred | Local/Cloud Shell connectivity blocked by private endpoint DNS resolution (infrastructure constraint) |
+| OpenAI LLM | 🔴 Deferred | `credit_balance_exhausted` blocks email generation |
+
+**Phase 14.8 sequence send is deferred** due to external infrastructure and billing constraints. The allowlist is ready and the Graph provider is certified. When OpenAI credits are added, the sequence can be completed via the deployed API/worker (which already have PostgreSQL connectivity via the private endpoint).
+
 ## Conclusion
 
-The ProjectX TEST/SHADOW control plane is **healthy, reachable, and fully end-to-end tested**. All mandatory infrastructure checks, Terraform/bootstrap verification, DNS/TLS, deployment safety settings, package tests, and the full Phase 14 E2E suite pass with 0 failures. Microsoft Graph Mail.Send is now externally certified. The only remaining items are external billing/licensing blockers (OpenAI and Dynamics). Once those are resolved, rerun the embedding, LLM, and Dataverse live smoke tests.
+The ProjectX TEST/SHADOW control plane is **healthy, reachable, and fully end-to-end tested**. All mandatory infrastructure checks, Terraform/bootstrap verification, DNS/TLS, deployment safety settings, package tests, and the full Phase 14 E2E suite pass with 0 failures. Microsoft Graph Mail.Send is externally certified. The allowlist is populated and ready for controlled testing. The Phase 14.8 sequence send is deferred pending OpenAI credit activation. Once credits are added, the full end-to-end pipeline can be executed via the deployed infrastructure without local connectivity issues.
