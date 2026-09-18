@@ -22,6 +22,14 @@ export type ReplyMessageId = string & { readonly __brand: 'ReplyMessageId' };
 export type SignalId = string & { readonly __brand: 'SignalId' };
 export type ResearchRunId = string & { readonly __brand: 'ResearchRunId' };
 export type ICPProfileVersionId = string & { readonly __brand: 'ICPProfileVersionId' };
+export type FacilityId = string & { readonly __brand: 'FacilityId' };
+export type OpportunityId = string & { readonly __brand: 'OpportunityId' };
+export type ProposalId = string & { readonly __brand: 'ProposalId' };
+export type PilotId = string & { readonly __brand: 'PilotId' };
+export type ContractId = string & { readonly __brand: 'ContractId' };
+export type SubscriptionId = string & { readonly __brand: 'SubscriptionId' };
+export type RevenueEventId = string & { readonly __brand: 'RevenueEventId' };
+export type ClaimId = string & { readonly __brand: 'ClaimId' };
 
 export function asMissionId(value: string): MissionId {
   return value as MissionId;
@@ -117,4 +125,36 @@ export function asResearchRunId(value: string): ResearchRunId {
 
 export function asICPProfileVersionId(value: string): ICPProfileVersionId {
   return value as ICPProfileVersionId;
+}
+
+export function asFacilityId(value: string): FacilityId {
+  return value as FacilityId;
+}
+
+export function asOpportunityId(value: string): OpportunityId {
+  return value as OpportunityId;
+}
+
+export function asProposalId(value: string): ProposalId {
+  return value as ProposalId;
+}
+
+export function asPilotId(value: string): PilotId {
+  return value as PilotId;
+}
+
+export function asContractId(value: string): ContractId {
+  return value as ContractId;
+}
+
+export function asSubscriptionId(value: string): SubscriptionId {
+  return value as SubscriptionId;
+}
+
+export function asRevenueEventId(value: string): RevenueEventId {
+  return value as RevenueEventId;
+}
+
+export function asClaimId(value: string): ClaimId {
+  return value as ClaimId;
 }

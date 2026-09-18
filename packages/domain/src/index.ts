@@ -8,6 +8,7 @@ export * from './entity/entity';
 export * from './errors/domain-errors';
 export * from './events/domain-event';
 export * from './mission';
+export * from './commercial';
 export * from './outreach';
 export * from './conversation';
 export * from './repository/repository.interface';

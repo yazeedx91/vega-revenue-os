@@ -12,4 +12,5 @@ export * from './value-objects/recipient';
 export * from './value-objects/protected-recipient';
 export * from './value-objects/sequence-step';
 export * from './value-objects/message-draft';
+export { Claim as MessageClaim, MessageDraft } from './value-objects/message-draft';
 export * from './value-objects/outreach-plan';
